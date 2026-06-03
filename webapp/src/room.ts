@@ -149,6 +149,10 @@ export class SyncRoom {
     return this.peers.size
   }
 
+  myId(): string {
+    return this.clientId
+  }
+
   leave() {
     void this.publish({ ch: 'bye', from: this.clientId })
     this.client?.end()

@@ -88,6 +88,7 @@ export class Player {
           return
         }
         this.destroyHls()
+        this.url = null
         this.cb.onFatalError(data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'network' : 'media')
       })
     } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {

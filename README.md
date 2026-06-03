@@ -5,7 +5,8 @@ Guarda contenuti in streaming in sync con un'altra persona, **peer-to-peer**: ne
 ## Come funziona
 
 - **Web app** (`webapp/`): player HLS ([hls.js](https://github.com/video-dev/hls.js)) + sync via **broker MQTT-over-WebSocket pubblico** (`broker.emqx.io`), end-to-end encrypted. Nessun account, nessun server proprio, nessun TURN.
-- **Estensione browser** (`extension/`): serve solo all'host. Sulla pagina del player vixcloud aggiunge un bottone "copia m3u8" che legge `window.masterPlaylist` e compone l'URL dello stream.
+- **Estensione browser** (`extension/`, desktop): legge `window.masterPlaylist` nel player vixcloud e **consegna l'm3u8 a SeeHub da sola** (storage → content script sulla pagina SeeHub → `postMessage`), oltre al bottone "copia m3u8" di fallback.
+- **Apple Shortcut** (`SHORTCUT.md`, iPad/iPhone): estrattore nativo per chi non può installare estensioni.
 - Lo streaming arriva direttamente dal CDN a entrambi i peer (CORS aperto sui playlist/segmenti): sul broker passano solo i messaggi di sync (pochi byte), per giunta cifrati.
 
 ### Perché un broker e non P2P/WebRTC?
@@ -21,20 +22,28 @@ npm run dev          # webapp su http://localhost:5173
 
 Estensione (solo host): `chrome://extensions` → Developer mode → "Load unpacked" → cartella `extension/`.
 
+## Il vincolo chiave: token legato all'IP
+
+Il token vixcloud è **firmato sull'IP** di chi lo estrae. Quindi **l'URL m3u8 NON è condivisibile** tra reti diverse: il link dell'host dà `403` all'altro peer. Ogni peer deve estrarre il **proprio** link, dal proprio IP. La sync condivide solo play/pausa/seek/posizione — mai l'URL.
+
+Per questo l'estrazione dev'essere **nativa** (browser blocca i GET cross-origin verso il sito): estensione (desktop) o Apple Shortcut (iPad). Entrambi girano dall'IP del dispositivo.
+
 ## Uso
 
-1. **Host**: apri la webapp → "Crea stanza" → "Copia link invito" → mandalo all'altra persona.
-2. **Ospite**: apre il link. Fine — nessuna installazione.
-3. **Host**: apri l'episodio sul sito di streaming, clicca il bottone rosso "📋 SeeHub: copia m3u8" sul player, incolla nella webapp → "Carica". Il video parte su entrambi.
-4. Play / pausa / seek di chiunque si propagano all'altro. Il drift si corregge da solo (heartbeat ogni 4s).
+1. **Host**: webapp → "Crea stanza". Incolla l'**URL episodio** (es. `.../it/watch/1955?e=82376`) nel campo apposito → "Copia link invito" (contiene `room` + `ep`) → mandalo all'altra persona.
+2. **Host carica il suo video**: apri l'episodio sul sito → con l'estensione installata il video si carica **da solo** nella webapp (oppure bottone rosso "copia m3u8" → incolla).
+3. **Ospite** apre il link:
+   - **PC/Windows** (estensione installata): tocca "Apri episodio" → il video si carica da solo.
+   - **iPad** (Shortcut "SeeHub" installato, vedi [SHORTCUT.md](SHORTCUT.md)): tocca "▶︎ Avvia" → estrae e torna sincronizzato.
+4. Play / pausa / seek di chiunque si propagano. Il drift si corregge da solo (heartbeat ogni 4s).
 
 ### Token scaduto (~6h)
 
-Gli URL m3u8 di vixcloud scadono dopo ~6 ore. Se lo stream muore: l'host ri-estrae l'URL con l'estensione e lo incolla di nuovo — la posizione viene mantenuta su entrambi i lati.
+Gli URL scadono dopo ~6h. Riapri l'episodio (PC) o ri-tocca "Avvia" (iPad): la posizione viene mantenuta.
 
-### Se i peer non si connettono
+### I peer si connettono sempre?
 
-Reti con NAT simmetrico su entrambi i lati bloccano il P2P diretto. Decommenta il blocco TURN in `webapp/src/config.ts` (es. free tier di metered.ca).
+Sì: il sync passa per un broker pubblico raggiunto **in uscita** da entrambi → niente problema NAT/CGNAT, niente TURN.
 
 ## Test
 

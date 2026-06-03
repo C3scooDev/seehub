@@ -99,6 +99,13 @@
 
       <!-- Room view -->
       <section id="room-view" class="hidden">
+        <!-- Host: optional episode URL → richer invite (drives iPad Shortcut / desktop helper) -->
+        <div class="panel" id="episode-panel">
+          <div class="row">
+            <input type="text" id="episode-input" placeholder="(host) URL episodio, es. https://streamingcommunityz.design/it/watch/1955?e=82376" />
+          </div>
+          <p class="hint">Opzionale: incollalo per generare un invito che l'altra persona apre e basta (iPad/PC).</p>
+        </div>
         <div class="panel">
           <div class="row">
             <input type="text" id="invite-link" readonly />
@@ -106,9 +113,16 @@
           </div>
           <p class="hint">Manda questo link all'altra persona. Si apre e basta.</p>
         </div>
+
+        <!-- Guest helper: shown when invite carries an episode and we have no stream yet -->
+        <div class="panel hidden" id="extract-panel">
+          <button id="extract-btn">▶︎ Avvia</button>
+          <p class="hint" id="extract-hint"></p>
+        </div>
+
         <div class="panel" id="load-panel">
           <div class="row">
-            <input type="text" id="m3u8-input" placeholder="Incolla qui l'URL .m3u8 (dall'estensione SeeHub)" />
+            <input type="text" id="m3u8-input" placeholder="Incolla qui l'URL .m3u8 (estensione / Shortcut)" />
             <button id="load-m3u8">Carica</button>
           </div>
           <p class="hint" id="load-hint">Chi carica il video diventa host della sync.</p>

@@ -11,14 +11,25 @@ function randomRoomId(): string {
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('')
 }
 
-function inviteUrl(roomId: string): string {
+// Name the user must give the imported Apple Shortcut.
+const SHORTCUT_NAME = 'SeeHub'
+
+function inviteUrl(roomId: string, episode?: string): string {
   const url = new URL(location.href)
-  url.search = `?room=${roomId}`
+  url.search = ''
+  url.searchParams.set('room', roomId)
+  if (episode) url.searchParams.set('ep', episode)
   return url.toString()
 }
 
-function enterRoom(roomId: string) {
-  showRoomView(inviteUrl(roomId))
+function isIOS(): boolean {
+  const ua = navigator.userAgent
+  // iPadOS 13+ reports as desktop Mac; detect via touch points.
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+}
+
+function enterRoom(roomId: string, initialEpisode: string | null) {
+  showRoomView(inviteUrl(roomId, initialEpisode ?? undefined))
   setStatus(0)
 
   const room = new SyncRoom(roomId)
@@ -30,52 +41,87 @@ function enterRoom(roomId: string) {
     onUserPlay: (pos) => engine.userPlay(pos),
     onUserPause: (pos) => engine.userPause(pos),
     onUserSeek: (pos) => engine.userSeek(pos),
-    onFatalError: (kind) => {
-      if (kind === 'network') {
-        toast('Stream scaduto o irraggiungibile: ri-estrai il link m3u8 e ricaricalo')
-        ui.loadHint().textContent =
-          'Token probabilmente scaduto (~6h). Ri-estrai con l’estensione e incolla qui: la posizione viene mantenuta.'
-      } else {
-        toast('Errore di riproduzione')
-      }
-    },
+    onFatalError: (kind) => engine.notifyMediaFailed(kind),
   })
 
   engine = new SyncEngine(player, room, {
     onPeersChanged: (count) => setStatus(count),
-    onRemoteUrl: () => {
-      ui.m3u8Input().placeholder = 'Video caricato dall’host'
-      toast('Video ricevuto dal peer')
+    onNeedLocalUrl: (reason) => {
+      const msg =
+        reason === 'forbidden'
+          ? 'Il token è legato all’IP: il link non vale sulla tua rete. Estrai il TUO con l’estensione e incollalo qui.'
+          : reason === 'error'
+            ? 'Errore di riproduzione. Ri-estrai il link e riprova.'
+            : 'L’altra persona ha avviato l’episodio. Apri lo stesso episodio, estrai il TUO link con l’estensione e incollalo qui per sincronizzarti.'
+      ui.loadHint().textContent = msg
+      toast('Incolla il tuo link m3u8')
     },
   })
+
+  // Central entry point for any m3u8 we obtain (manual, extension, Shortcut).
+  function load(url: string) {
+    const trimmed = url.trim()
+    if (!/^https?:\/\//.test(trimmed)) {
+      toast('URL non valido')
+      return
+    }
+    const reload = player.hasUrl
+    engine.userLoad(trimmed)
+    ui.extractPanel().classList.add('hidden')
+    toast(reload ? 'Stream aggiornato' : 'Video caricato')
+  }
 
   ui.copyInviteBtn().addEventListener('click', () => {
     void navigator.clipboard.writeText(ui.inviteLink().value)
     toast('Link copiato ✓')
   })
 
-  ui.loadBtn().addEventListener('click', () => {
-    const url = ui.m3u8Input().value.trim()
-    if (!url) return
-    if (!/^https?:\/\//.test(url)) {
-      toast('URL non valido')
-      return
-    }
-    // Re-load of a new URL while one is playing = token refresh (keeps position)
-    const reason = player.hasUrl ? 'token-refresh' : 'load'
-    engine.loadAsHost(url, reason)
-    toast(reason === 'token-refresh' ? 'Stream aggiornato' : 'Video caricato, sei l’host')
+  // Host fills the episode URL → invite link gains ?ep= so the guest can be
+  // driven hands-off (iPad Shortcut / desktop extension).
+  ui.episodeInput().addEventListener('input', () => {
+    const ep = ui.episodeInput().value.trim()
+    ui.inviteLink().value = inviteUrl(roomId, ep || undefined)
   })
 
-  // m3u8 handed over from the extension via query param
+  ui.loadBtn().addEventListener('click', () => load(ui.m3u8Input().value))
+
+  // Auto-load from the browser extension bridge (it posts the captured m3u8
+  // into the SeeHub page so the guest never pastes anything).
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.data?.type !== 'SEEHUB_M3U8') return
+    if (typeof event.data.url === 'string') load(event.data.url)
+  })
+
   const params = new URLSearchParams(location.search)
+
+  // m3u8 handed over via query param (extension or Shortcut)
   const m3u8 = params.get('m3u8')
   if (m3u8) {
-    ui.m3u8Input().value = m3u8
-    // strip it from the address bar (it contains a token)
-    const clean = new URL(location.href)
+    load(m3u8)
+    const clean = new URL(location.href) // strip token from the address bar
     clean.searchParams.delete('m3u8')
     history.replaceState(null, '', clean)
+  }
+
+  // Guest helper: invite carried an episode and we have no stream yet.
+  const episode = params.get('ep')
+  if (episode && !m3u8) {
+    ui.episodeInput().value = episode
+    const panel = ui.extractPanel()
+    panel.classList.remove('hidden')
+    if (isIOS()) {
+      ui.extractHint().textContent =
+        'iPad: tocca Avvia → lo Shortcut "SeeHub" estrae il tuo link e ti riporta qui sincronizzato.'
+      ui.extractBtn().addEventListener('click', () => {
+        const input = encodeURIComponent(roomId + '|' + episode)
+        location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=${input}`
+      })
+    } else {
+      ui.extractBtn().textContent = '▶︎ Apri episodio'
+      ui.extractHint().textContent =
+        'PC: con l’estensione SeeHub installata, apri l’episodio — il video si carica qui da solo.'
+      ui.extractBtn().addEventListener('click', () => window.open(episode, '_blank'))
+    }
   }
 }
 
@@ -84,7 +130,7 @@ function init() {
   const roomId = params.get('room')
 
   if (roomId) {
-    enterRoom(roomId)
+    enterRoom(roomId, params.get('ep'))
     return
   }
 
@@ -93,7 +139,7 @@ function init() {
     const url = new URL(location.href)
     url.searchParams.set('room', id)
     history.replaceState(null, '', url)
-    enterRoom(id)
+    enterRoom(id, null)
   })
 }
 

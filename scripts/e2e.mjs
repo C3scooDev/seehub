@@ -31,24 +31,25 @@ await host.waitForSelector('#status.connected', { timeout: 90000 }).catch(() => 
 await guest.waitForSelector('#status.connected', { timeout: 30000 }).catch(() => fail('guest never connected'))
 console.log('✓ peers connected')
 
-// 2. Host loads m3u8 → guest auto-receives URL
+// 2. Per-peer model: each peer loads its OWN m3u8 (tokens are IP-bound). Here
+// both are on the same IP, so the same test URL works for both.
+const videoReady = (page) =>
+  page.waitForFunction(
+    () => {
+      const v = document.getElementById('video')
+      return v && v.readyState >= 1
+    },
+    { timeout: 60000 }
+  )
+
 await host.fill('#m3u8-input', TEST_M3U8)
 await host.click('#load-m3u8')
+await videoReady(host).catch(() => fail('host did not load its video'))
 
-const guestHasVideo = async () =>
-  guest.evaluate(() => {
-    const v = document.getElementById('video')
-    return v && v.readyState >= 1 && v.duration > 0
-  })
-
-await guest.waitForFunction(
-  () => {
-    const v = document.getElementById('video')
-    return v && v.readyState >= 1
-  },
-  { timeout: 60000 }
-).catch(() => fail('guest did not load video from broadcast URL'))
-console.log('✓ guest received and loaded m3u8:', await guestHasVideo())
+await guest.fill('#m3u8-input', TEST_M3U8)
+await guest.click('#load-m3u8')
+await videoReady(guest).catch(() => fail('guest did not load its video'))
+console.log('✓ both peers loaded their own m3u8')
 
 // 3. Host plays → guest plays
 await host.evaluate(() => document.getElementById('video').play().catch(() => {}))

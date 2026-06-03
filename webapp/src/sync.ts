@@ -8,17 +8,21 @@ import type { Player } from './player'
 import type { SyncRoom } from './room'
 import type { Ctrl, StateMsg, UrlMsg } from './types'
 
+// Vixcloud tokens are bound to the extractor's IP, so peers on different
+// networks CANNOT share one m3u8 URL — each must extract and load its OWN.
+// Therefore the URL is never force-loaded across peers: we only sync controls
+// (play/pause/seek) and position. The "url" message is just a host-active
+// claim that tells the other peer to extract and paste its own link.
+
+export type NeedUrlReason = 'host-started' | 'forbidden' | 'error'
+
 export type SyncEvents = {
   onPeersChanged: (count: number) => void
-  onRemoteUrl: (url: string) => void
+  onNeedLocalUrl: (reason: NeedUrlReason) => void
 }
 
-// Coordinates player <-> room. The peer that loads a URL locally becomes
-// host: it heartbeats and is the resync authority; the guest drift-corrects.
 // After a local user action, ignore incoming heartbeats briefly: the host's
-// state is stale until our ctrl message reaches it and its next heartbeat
-// reflects it. Without this, host's old "paused" heartbeat re-pauses a guest
-// that just resumed.
+// state is stale until our ctrl reaches it and its next heartbeat reflects it.
 const HEARTBEAT_GRACE_MS = HEARTBEAT_MS + 1500
 
 export class SyncEngine {
@@ -28,17 +32,19 @@ export class SyncEngine {
   private ev: SyncEvents
   private lastUserActionAt = 0
 
+  private localMediaLoaded = false
+  private sawRemoteAuthority = false
+  // Latest host position while we have no local media yet → jump here on load.
+  private pendingStart: { position: number; paused: boolean } | null = null
+
   constructor(player: Player, room: SyncRoom, ev: SyncEvents) {
     this.player = player
     this.room = room
     this.ev = ev
 
-    room.onCtrl((msg) => {
-      console.debug('[sync] recv ctrl', msg.type, msg.position.toFixed(1))
-      this.handleCtrl(msg)
-    })
+    room.onCtrl((msg) => this.handleCtrl(msg))
     room.onState((msg) => this.handleState(msg))
-    room.onUrl((msg) => this.handleUrl(msg))
+    room.onUrl((msg, peerId) => this.handleUrl(msg, peerId))
 
     room.onPeerJoin(() => {
       this.ev.onPeersChanged(room.peerCount())
@@ -62,41 +68,48 @@ export class SyncEngine {
   // --- outgoing: user-originated player events ---
 
   userPlay(position: number) {
-    console.debug('[sync] send play', position.toFixed(1))
     this.lastUserActionAt = Date.now()
     this.room.sendCtrl({ type: 'play', position, sentAt: Date.now() })
   }
 
   userPause(position: number) {
-    console.debug('[sync] send pause', position.toFixed(1))
     this.lastUserActionAt = Date.now()
     this.room.sendCtrl({ type: 'pause', position, sentAt: Date.now() })
   }
 
   userSeek(position: number) {
-    console.debug('[sync] send seek', position.toFixed(1))
     this.lastUserActionAt = Date.now()
     this.room.sendCtrl({ type: 'seek', position, sentAt: Date.now() })
   }
 
-  // Host loads a URL locally and broadcasts it.
-  loadAsHost(url: string, reason: UrlMsg['reason'] = 'load') {
-    this.isHost = true
-    if (reason === 'token-refresh') {
-      const pos = this.player.getState().position
+  // User pasted an m3u8 (their own). Loads locally; broadcasts a host-claim
+  // only if no other peer is already the authority.
+  userLoad(url: string) {
+    const reload = this.player.hasUrl
+    if (reload) {
       this.player.swapUrl(url)
-      this.room.sendUrl({ url, position: pos, reason })
     } else {
-      this.player.loadUrl(url)
-      this.room.sendUrl({ url, reason })
+      const start = this.pendingStart
+      this.player.loadUrl(url, start?.position ?? 0, start?.paused ?? true)
     }
+    this.localMediaLoaded = true
+
+    if (!this.sawRemoteAuthority) {
+      this.isHost = true
+      this.room.sendUrl({ url, reason: reload ? 'token-refresh' : 'load' })
+    }
+  }
+
+  // Player reported a fatal load error (403 token = IP-bound, or media error).
+  notifyMediaFailed(kind: 'network' | 'media') {
+    this.localMediaLoaded = false
+    this.ev.onNeedLocalUrl(kind === 'network' ? 'forbidden' : 'error')
   }
 
   private sendFullState() {
     const s = this.player.getState()
-    if (!s.url) return
     this.room.sendState({
-      url: s.url,
+      url: '', // not used by peers (IP-bound); kept for wire shape
       position: s.position,
       paused: s.paused,
       sentAt: Date.now(),
@@ -108,40 +121,46 @@ export class SyncEngine {
   private handleCtrl(msg: Ctrl) {
     switch (msg.type) {
       case 'play':
-        this.player.remotePlay(msg.position)
+        if (this.localMediaLoaded) this.player.remotePlay(msg.position)
+        else this.pendingStart = { position: msg.position, paused: false }
         break
       case 'pause':
-        this.player.remotePause(msg.position)
+        if (this.localMediaLoaded) this.player.remotePause(msg.position)
+        else this.pendingStart = { position: msg.position, paused: true }
         break
       case 'seek':
-        this.player.remoteSeek(msg.position)
+        if (this.localMediaLoaded) this.player.remoteSeek(msg.position)
+        else if (this.pendingStart) this.pendingStart.position = msg.position
         break
       case 'heartbeat':
-        if (!this.isHost) this.applyDrift(msg)
+        if (this.isHost) break
+        if (this.localMediaLoaded) this.applyDrift(msg)
+        else this.pendingStart = { position: msg.position, paused: msg.paused }
         break
     }
   }
 
   private handleState(msg: StateMsg) {
-    if (this.isHost) return
-    const s = this.player.getState()
-    if (s.url !== msg.url) {
-      this.ev.onRemoteUrl(msg.url)
-      this.player.loadUrl(msg.url, msg.position, msg.paused)
-    } else {
+    this.sawRemoteAuthority = true
+    this.isHost = false
+    if (this.localMediaLoaded) {
       if (msg.paused) this.player.remotePause(msg.position)
       else this.player.remotePlay(msg.position)
+    } else {
+      this.pendingStart = { position: msg.position, paused: msg.paused }
+      this.ev.onNeedLocalUrl('host-started')
     }
   }
 
-  private handleUrl(msg: UrlMsg) {
-    this.isHost = false
-    this.ev.onRemoteUrl(msg.url)
-    if (msg.reason === 'token-refresh') {
-      this.player.swapUrl(msg.url, msg.position)
-    } else {
-      this.player.loadUrl(msg.url, msg.position ?? 0)
+  private handleUrl(_msg: UrlMsg, peerId: string) {
+    // Both peers may claim host if they loaded near-simultaneously. Deterministic
+    // tie-break: lower clientId stays host.
+    if (this.isHost && this.localMediaLoaded) {
+      if (this.room.myId() < peerId) return // I keep host; ignore their claim
     }
+    this.sawRemoteAuthority = true
+    this.isHost = false
+    if (!this.localMediaLoaded) this.ev.onNeedLocalUrl('host-started')
   }
 
   private applyDrift(hb: Extract<Ctrl, { type: 'heartbeat' }>) {

@@ -13,6 +13,8 @@ window.addEventListener('message', (event) => {
   if (event.source !== window || !event.data) return
   if (event.data.type === 'SEEHUB_M3U8') {
     m3u8Url = event.data.url
+    // Stash it so an already-open SeeHub tab can grab it automatically.
+    chrome.runtime.sendMessage({ type: 'SEEHUB_SET_M3U8', url: m3u8Url })
     showButton()
   } else if (event.data.type === 'SEEHUB_M3U8_FAIL') {
     showButton('masterPlaylist non trovato', true)

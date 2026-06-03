@@ -1,18 +1,27 @@
 {
   "manifest_version": 3,
   "name": "SeeHub m3u8 extractor",
-  "version": "0.1.0",
-  "description": "Estrae l'URL m3u8 dal player vixcloud e lo copia negli appunti per SeeHub.",
+  "version": "0.2.0",
+  "description": "Estrae l'URL m3u8 dal player vixcloud e lo consegna a SeeHub (auto) o negli appunti.",
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["*://vixcloud.co/embed/*"],
       "all_frames": true,
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://c3scoodev.github.io/seehub/*"],
+      "all_frames": false,
+      "js": ["seehub.js"],
+      "run_at": "document_idle"
     }
   ],
-  "permissions": ["clipboardWrite"],
-  "host_permissions": ["*://vixcloud.co/*"],
+  "permissions": ["clipboardWrite", "storage"],
+  "host_permissions": ["*://vixcloud.co/*", "*://c3scoodev.github.io/*"],
   "web_accessible_resources": [
     {
       "resources": ["inject.js"],
