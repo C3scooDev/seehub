@@ -2,7 +2,7 @@
 // Uses public nostr relays for signaling and a public test HLS stream.
 import { chromium } from 'playwright'
 
-const BASE = 'http://localhost:5173/'
+const BASE = process.env.BASE || 'http://localhost:5173/'
 const TEST_M3U8 = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
 const ROOM = 'e2e' + Math.random().toString(36).slice(2, 8)
 
