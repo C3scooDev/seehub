@@ -14,7 +14,13 @@ function deliver(url) {
 }
 
 function resolve(ep) {
-  if (ep) chrome.runtime.sendMessage({ type: 'SEEHUB_RESOLVE_EP', ep })
+  if (!ep) return
+  chrome.runtime.sendMessage({ type: 'SEEHUB_RESOLVE_EP', ep }, (resp) => {
+    // success delivers via storage.onChanged; only surface failures here
+    if (resp && resp.ok === false) {
+      window.postMessage({ type: 'SEEHUB_M3U8_ERR', error: resp.error }, location.origin)
+    }
+  })
 }
 
 const ep = new URLSearchParams(location.search).get('ep')

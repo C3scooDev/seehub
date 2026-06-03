@@ -73,8 +73,20 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
 
   // Ask the browser extension (if installed) to resolve an episode URL to an
   // m3u8 natively (background fetch, from this machine's IP). No-op without it.
+  let resolveTimer: number | undefined
   function requestResolve(ep: string) {
-    if (ep) window.postMessage({ type: 'SEEHUB_RESOLVE', ep }, location.origin)
+    if (!ep) return
+    if (!/^https?:\/\/.*\/watch\/\d+/.test(ep) || !/[?&]e=\d+/.test(ep)) {
+      toast('URL episodio non valido (serve un link …/watch/<id>?e=<ep>)')
+      return
+    }
+    window.postMessage({ type: 'SEEHUB_RESOLVE', ep }, location.origin)
+    toast('Estrazione in corso…')
+    // If nothing loads, the extension is missing or the resolve failed.
+    clearTimeout(resolveTimer)
+    resolveTimer = window.setTimeout(() => {
+      if (!player.hasUrl) toast('Nessuna risposta: estensione installata? Apri lo stesso browser.')
+    }, 9000)
   }
 
   ui.copyInviteBtn().addEventListener('click', () => {
@@ -88,7 +100,10 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     const ep = ui.episodeInput().value.trim()
     ui.inviteLink().value = inviteUrl(roomId, ep || undefined)
   })
-  // On commit (blur/enter), let the extension load the host's own video too.
+  // Explicit button + commit (blur/enter) both trigger extension resolution.
+  ui.episodeLoadBtn().addEventListener('click', () => {
+    requestResolve(ui.episodeInput().value.trim())
+  })
   ui.episodeInput().addEventListener('change', () => {
     requestResolve(ui.episodeInput().value.trim())
   })
@@ -98,8 +113,14 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
   // Auto-load from the browser extension bridge (it posts the captured m3u8
   // into the SeeHub page so the guest never pastes anything).
   window.addEventListener('message', (event) => {
-    if (event.source !== window || event.data?.type !== 'SEEHUB_M3U8') return
-    if (typeof event.data.url === 'string') load(event.data.url)
+    if (event.source !== window) return
+    if (event.data?.type === 'SEEHUB_M3U8' && typeof event.data.url === 'string') {
+      clearTimeout(resolveTimer)
+      load(event.data.url)
+    } else if (event.data?.type === 'SEEHUB_M3U8_ERR') {
+      clearTimeout(resolveTimer)
+      toast('Estrazione fallita: ' + (event.data.error || 'errore') + '. Riprova / ricarica l’episodio.')
+    }
   })
 
   const params = new URLSearchParams(location.search)

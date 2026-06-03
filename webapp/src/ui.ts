@@ -11,6 +11,7 @@ export const ui = {
   inviteLink: () => el<HTMLInputElement>('invite-link'),
   copyInviteBtn: () => el<HTMLButtonElement>('copy-invite'),
   episodeInput: () => el<HTMLInputElement>('episode-input'),
+  episodeLoadBtn: () => el<HTMLButtonElement>('episode-load'),
   extractPanel: () => el<HTMLElement>('extract-panel'),
   extractBtn: () => el<HTMLButtonElement>('extract-btn'),
   extractHint: () => el<HTMLElement>('extract-hint'),
