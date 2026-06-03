@@ -31,10 +31,5 @@
       "resources": ["inject.js"],
       "matches": ["*://vixcloud.co/*"]
     }
-  ],
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "seehub-extractor@seehub.local"
-    }
-  }
+  ]
 }
