@@ -1,0 +1,14 @@
+{
+  "name": "seehub",
+  "private": true,
+  "workspaces": [
+    "webapp"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w webapp",
+    "build": "npm run build -w webapp"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

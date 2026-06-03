@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SeeHub — watch together</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1115;
+        --panel: #1a1d24;
+        --accent: #e0506e;
+        --text: #e8e8ea;
+        --muted: #8b8f98;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, sans-serif;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      header {
+        width: 100%;
+        max-width: 960px;
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 { font-size: 1.2rem; margin: 0; color: var(--accent); }
+      main { width: 100%; max-width: 960px; padding: 0 16px 24px; }
+      .panel {
+        background: var(--panel);
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      button.secondary { background: #2b2f3a; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      input[type="text"] {
+        background: #11141a;
+        border: 1px solid #2b2f3a;
+        border-radius: 8px;
+        color: var(--text);
+        padding: 8px 10px;
+        font-size: 0.95rem;
+        width: 100%;
+      }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .row input[type="text"] { flex: 1; min-width: 200px; }
+      #status { font-size: 0.85rem; color: var(--muted); margin-left: auto; }
+      #status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #777; margin-right: 6px; }
+      #status.connected .dot { background: #3fbf6f; }
+      video { width: 100%; border-radius: 10px; background: #000; display: none; }
+      .hidden { display: none !important; }
+      .hint { color: var(--muted); font-size: 0.85rem; margin: 8px 0 0; }
+      #toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #2b2f3a;
+        padding: 10px 18px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        opacity: 0;
+        transition: opacity 0.25s;
+        pointer-events: none;
+      }
+      #toast.show { opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>SeeHub</h1>
+      <span id="status"><span class="dot"></span><span id="status-text">non connesso</span></span>
+    </header>
+    <main>
+      <!-- Landing: no room yet -->
+      <section id="landing" class="panel">
+        <p>Guarda in sync con qualcuno, peer-to-peer, senza server.</p>
+        <button id="create-room">Crea stanza</button>
+      </section>
+
+      <!-- Room view -->
+      <section id="room-view" class="hidden">
+        <div class="panel">
+          <div class="row">
+            <input type="text" id="invite-link" readonly />
+            <button id="copy-invite" class="secondary">Copia link invito</button>
+          </div>
+          <p class="hint">Manda questo link all'altra persona. Si apre e basta.</p>
+        </div>
+        <div class="panel" id="load-panel">
+          <div class="row">
+            <input type="text" id="m3u8-input" placeholder="Incolla qui l'URL .m3u8 (dall'estensione SeeHub)" />
+            <button id="load-m3u8">Carica</button>
+          </div>
+          <p class="hint" id="load-hint">Chi carica il video diventa host della sync.</p>
+        </div>
+        <video id="video" controls playsinline></video>
+      </section>
+    </main>
+    <div id="toast"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
