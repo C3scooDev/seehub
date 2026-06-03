@@ -8,14 +8,14 @@
     var mp = window.masterPlaylist
     if (mp && mp.url && mp.params && mp.params.token) {
       clearInterval(timer)
+      // No &h=1/&b=1: that param now yields 403 (token signed over bare query).
       var url =
         mp.url +
         (mp.url.indexOf('?') === -1 ? '?' : '&') +
         'token=' +
         mp.params.token +
         '&expires=' +
-        mp.params.expires +
-        (window.canPlayFHD ? '&h=1' : '&b=1')
+        mp.params.expires
       window.postMessage({ type: 'SEEHUB_M3U8', url: url }, '*')
     } else if (tries > 40) {
       // ~10s: the inline script never showed up

@@ -26,7 +26,8 @@ App **Comandi** (Shortcuts) → **+** → rinominalo **esattamente** `SeeHub`. A
 9. **Abbina testo** su `HTML`, pattern `'token':\s*'([0-9a-f]+)'` → gruppo 1 → var `TOKEN`.
 10. **Abbina testo** su `HTML`, pattern `'expires':\s*'(\d+)'` → gruppo 1 → var `EXP`.
 11. **Abbina testo** su `HTML`, pattern `url:\s*'(https://vixcloud\.co/playlist/[^']+)'` → gruppo 1 → var `PURL`.
-12. **Testo**: `[PURL]?token=[TOKEN]&expires=[EXP]&h=1` → **Codifica URL** → var `M3U8`.
+12. **Testo**: `[PURL]?token=[TOKEN]&expires=[EXP]` → **Codifica URL** → var `M3U8`.
+   (NB: niente `&h=1`/`&b=1` — ora danno 403.)
 13. **Testo**: `https://c3scoodev.github.io/seehub/?room=[ROOM]&m3u8=[M3U8]` → var `OPEN`.
 14. **Apri URL** `OPEN`.
 
@@ -40,7 +41,7 @@ Per verificare l'estrazione da sola: dopo l'azione 12 aggiungi temporaneamente *
 test|https://streamingcommunityz.design/it/watch/1955?e=82376
 ```
 
-Se l'avviso mostra un URL `https://vixcloud.co/playlist/...?token=...&expires=...&h=1`, l'estrazione funziona. Poi togli l'avviso e lascia l'**Apri URL**.
+Se l'avviso mostra un URL `https://vixcloud.co/playlist/...?token=...&expires=...`, l'estrazione funziona. Poi togli l'avviso e lascia l'**Apri URL**.
 
 ## Uso (ogni episodio)
 

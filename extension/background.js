@@ -19,10 +19,11 @@ async function resolveEpisode(ep) {
   const token = t2.match(/'token':\s*'([0-9a-f]+)'/)?.[1]
   const expires = t2.match(/'expires':\s*'(\d+)'/)?.[1]
   const purl = t2.match(/url:\s*'(https:\/\/vixcloud\.co\/playlist\/[^']+)'/)?.[1]
-  const fhd = /canPlayFHD\s*=\s*true/.test(t2)
   if (!token || !expires || !purl) throw new Error('masterPlaylist non trovata')
 
-  return `${purl}?token=${token}&expires=${expires}${fhd ? '&h=1' : '&b=1'}`
+  // NB: appending &h=1/&b=1 now yields 403 — the token is signed over the bare
+  // query string. Keep just token+expires; the master lists all renditions.
+  return `${purl}?token=${token}&expires=${expires}`
 }
 
 async function storeM3u8(url) {
