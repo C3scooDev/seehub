@@ -26,7 +26,7 @@ async function resolveEpisode(ep) {
 }
 
 async function storeM3u8(url) {
-  await chrome.storage.session.set({ latestM3u8: url, latestAt: Date.now() })
+  await chrome.storage.local.set({ latestM3u8: url, latestAt: Date.now() })
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -44,7 +44,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true
   }
   if (msg?.type === 'SEEHUB_GET_M3U8') {
-    chrome.storage.session.get(['latestM3u8', 'latestAt']).then((d) => sendResponse(d))
+    chrome.storage.local.get(['latestM3u8', 'latestAt']).then((d) => sendResponse(d))
     return true
   }
 })
