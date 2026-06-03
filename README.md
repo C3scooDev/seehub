@@ -4,9 +4,13 @@ Guarda contenuti in streaming in sync con un'altra persona, **peer-to-peer**: ne
 
 ## Come funziona
 
-- **Web app** (`webapp/`): player HLS ([hls.js](https://github.com/video-dev/hls.js)) + sync WebRTC ([trystero](https://github.com/dmotz/trystero), signaling via relay Nostr pubblici — zero infrastruttura).
+- **Web app** (`webapp/`): player HLS ([hls.js](https://github.com/video-dev/hls.js)) + sync via **broker MQTT-over-WebSocket pubblico** (`broker.emqx.io`), end-to-end encrypted. Nessun account, nessun server proprio, nessun TURN.
 - **Estensione browser** (`extension/`): serve solo all'host. Sulla pagina del player vixcloud aggiunge un bottone "copia m3u8" che legge `window.masterPlaylist` e compone l'URL dello stream.
-- Lo streaming arriva direttamente dal CDN a entrambi i peer (CORS aperto sui playlist/segmenti): tra i due passano solo i messaggi di sync (pochi byte).
+- Lo streaming arriva direttamente dal CDN a entrambi i peer (CORS aperto sui playlist/segmenti): sul broker passano solo i messaggi di sync (pochi byte), per giunta cifrati.
+
+### Perché un broker e non P2P/WebRTC?
+
+Due hotspot mobili (CGNAT) hanno NAT simmetrico: il P2P diretto browser↔browser è impossibile senza un relay (TURN). Invece entrambi i browser si collegano **in uscita** allo stesso broker pubblico — e le connessioni in uscita passano sempre il CGNAT. I messaggi sono minuscoli, quindi WebRTC era sovradimensionato e dava solo il problema NAT.
 
 ## Setup
 
@@ -41,10 +45,12 @@ node scripts/e2e.mjs # 2 browser headless: connessione, scambio URL, sync bidire
 
 ## Deploy
 
-`npm run build` → `webapp/dist/` è statica (base relativa): GitHub Pages o qualsiasi hosting statico. WebRTC richiede https (o localhost).
+`npm run build` → `webapp/dist/` è statica (base relativa): GitHub Pages o qualsiasi hosting statico. Richiede https (o localhost) per WebCrypto/clipboard.
 
 ## Architettura sync
 
+- **Transport**: broker MQTT-over-WSS pubblico. Il *codice stanza* (128 bit, nel link) è sia indirizzo che segreto: deriva il **topic** (hash → stanza non indovinabile) e la **chiave AES-GCM** (`crypto.ts`). Il broker vede solo ciphertext.
+- **Presence**: ogni client annuncia `hello` all'ingresso e pinga ogni 5s; i peer scadono dopo 13s di silenzio → `onPeerLeave`.
 - Chi carica l'URL è **host** = autorità di resync: heartbeat ogni 4s; l'ospite corregge il drift (hard seek > 1.5s, nudge del playbackRate tra 0.4–1.5s).
 - Eco soppressa con "expectation consume-on-event": una mutazione applicata da remoto consuma l'unico evento nativo che genera, mai i successivi eventi reali dell'utente.
 - Dopo un'azione locale dell'utente l'ospite ignora gli heartbeat per ~5.5s (lo stato dell'host è stale finché il ctrl non lo raggiunge).

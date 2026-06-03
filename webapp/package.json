@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "hls.js": "^1.6.16",
-    "trystero": "^0.25.1"
+    "mqtt": "^5.15.1"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

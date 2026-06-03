@@ -4,8 +4,10 @@ import { SyncEngine } from './sync'
 import { ui, showRoomView, setStatus, toast } from './ui'
 
 function randomRoomId(): string {
+  // 128-bit code: it's both the room address and the encryption secret, and it
+  // only ever lives in the invite link (never typed), so favour entropy.
   const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789'
-  const bytes = crypto.getRandomValues(new Uint8Array(8))
+  const bytes = crypto.getRandomValues(new Uint8Array(26))
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('')
 }
 

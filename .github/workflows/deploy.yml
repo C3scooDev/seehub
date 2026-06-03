@@ -27,10 +27,6 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npm run build
-        env:
-          VITE_TURN_URL: ${{ secrets.TURN_URL }}
-          VITE_TURN_USER: ${{ secrets.TURN_USER }}
-          VITE_TURN_CRED: ${{ secrets.TURN_CRED }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
