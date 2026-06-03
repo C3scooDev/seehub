@@ -5,7 +5,7 @@ Guarda contenuti in streaming in sync con un'altra persona, **peer-to-peer**: ne
 ## Come funziona
 
 - **Web app** (`webapp/`): player HLS ([hls.js](https://github.com/video-dev/hls.js)) + sync via **broker MQTT-over-WebSocket pubblico** (`broker.emqx.io`), end-to-end encrypted. Nessun account, nessun server proprio, nessun TURN.
-- **Estensione browser** (`extension/`, desktop): legge `window.masterPlaylist` nel player vixcloud e **consegna l'm3u8 a SeeHub da sola** (storage → content script sulla pagina SeeHub → `postMessage`), oltre al bottone "copia m3u8" di fallback.
+- **Estensione browser** (`extension/`, desktop Chrome/Edge): il service worker, dato l'URL episodio nell'invito, **risolve l'm3u8 in background** (fetch cross-origin che bypassa CORS, dal IP della macchina) e lo consegna a SeeHub. Su PC l'ospite apre solo il link → **zero click**. Fallback: cattura dal player vixcloud + bottone "copia m3u8".
 - **Apple Shortcut** (`SHORTCUT.md`, iPad/iPhone): estrattore nativo per chi non può installare estensioni.
 - Lo streaming arriva direttamente dal CDN a entrambi i peer (CORS aperto sui playlist/segmenti): sul broker passano solo i messaggi di sync (pochi byte), per giunta cifrati.
 
@@ -33,7 +33,7 @@ Per questo l'estrazione dev'essere **nativa** (browser blocca i GET cross-origin
 1. **Host**: webapp → "Crea stanza". Incolla l'**URL episodio** (es. `.../it/watch/1955?e=82376`) nel campo apposito → "Copia link invito" (contiene `room` + `ep`) → mandalo all'altra persona.
 2. **Host carica il suo video**: apri l'episodio sul sito → con l'estensione installata il video si carica **da solo** nella webapp (oppure bottone rosso "copia m3u8" → incolla).
 3. **Ospite** apre il link:
-   - **PC/Windows** (estensione installata): tocca "Apri episodio" → il video si carica da solo.
+   - **PC/Windows** (estensione installata): **niente da fare** — l'estensione risolve l'episodio in background e il video si carica da solo. (Se non parte, bottone "Apri episodio" come fallback.)
    - **iPad** (Shortcut "SeeHub" installato, vedi [SHORTCUT.md](SHORTCUT.md)): tocca "▶︎ Avvia" → estrae e torna sincronizzato.
 4. Play / pausa / seek di chiunque si propagano. Il drift si corregge da solo (heartbeat ogni 4s).
 

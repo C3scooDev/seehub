@@ -71,6 +71,12 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     toast(reload ? 'Stream aggiornato' : 'Video caricato')
   }
 
+  // Ask the browser extension (if installed) to resolve an episode URL to an
+  // m3u8 natively (background fetch, from this machine's IP). No-op without it.
+  function requestResolve(ep: string) {
+    if (ep) window.postMessage({ type: 'SEEHUB_RESOLVE', ep }, location.origin)
+  }
+
   ui.copyInviteBtn().addEventListener('click', () => {
     void navigator.clipboard.writeText(ui.inviteLink().value)
     toast('Link copiato ✓')
@@ -81,6 +87,10 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
   ui.episodeInput().addEventListener('input', () => {
     const ep = ui.episodeInput().value.trim()
     ui.inviteLink().value = inviteUrl(roomId, ep || undefined)
+  })
+  // On commit (blur/enter), let the extension load the host's own video too.
+  ui.episodeInput().addEventListener('change', () => {
+    requestResolve(ui.episodeInput().value.trim())
   })
 
   ui.loadBtn().addEventListener('click', () => load(ui.m3u8Input().value))
@@ -117,9 +127,11 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
         location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=${input}`
       })
     } else {
+      // Desktop with the extension: resolves automatically in the background.
+      requestResolve(episode)
       ui.extractBtn().textContent = '▶︎ Apri episodio'
       ui.extractHint().textContent =
-        'PC: con l’estensione SeeHub installata, apri l’episodio — il video si carica qui da solo.'
+        'PC: con l’estensione SeeHub il video si carica da solo. Se non parte, tocca per aprire l’episodio.'
       ui.extractBtn().addEventListener('click', () => window.open(episode, '_blank'))
     }
   }

@@ -21,7 +21,11 @@
     }
   ],
   "permissions": ["clipboardWrite", "storage"],
-  "host_permissions": ["*://vixcloud.co/*", "*://c3scoodev.github.io/*"],
+  "host_permissions": [
+    "*://vixcloud.co/*",
+    "*://streamingcommunityz.design/*",
+    "*://c3scoodev.github.io/*"
+  ],
   "web_accessible_resources": [
     {
       "resources": ["inject.js"],
