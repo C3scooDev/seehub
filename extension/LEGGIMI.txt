@@ -1,0 +1,32 @@
+SeeHub — estensione (per guardare in sync)
+==========================================
+
+Serve Google Chrome o Microsoft Edge (NON Firefox/Safari).
+
+INSTALLAZIONE (una volta sola)
+------------------------------
+1. Estrai/scompatta questo zip in una cartella (tasto destro -> Estrai tutto).
+   Dentro trovi una cartella chiamata "extension".
+2. Apri il browser e vai a:
+     - Chrome:  chrome://extensions
+     - Edge:    edge://extensions
+3. Attiva "Modalita sviluppatore" (l'interruttore in alto a destra su Chrome,
+   in basso a sinistra su Edge).
+4. Clicca "Carica estensione non pacchettizzata" (Chrome) /
+   "Carica decompressa" (Edge).
+5. Seleziona la cartella "extension" (quella che contiene manifest.json).
+   Fatto: appare "SeeHub m3u8 extractor".
+
+COME SI USA
+-----------
+1. Lui ti manda un link (tipo https://c3scoodev.github.io/seehub/?room=...).
+2. Apri quel link nello stesso browser dove hai messo l'estensione.
+3. Non devi fare altro: il video si carica da solo e parte sincronizzato.
+   (Se non parte entro qualche secondo, clicca il bottone "Apri episodio".)
+
+NOTE
+----
+- Lascia aperta la scheda di SeeHub mentre guardate.
+- Se il browser chiede di "disattivare le estensioni in modalita sviluppatore",
+  ignora/chiudi: e' normale per le estensioni installate a mano.
+- Se dopo qualche ora il video si blocca: riapri il link che ti ha mandato.

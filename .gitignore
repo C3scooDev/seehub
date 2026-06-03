@@ -1,6 +1,5 @@
 node_modules/
 dist/
-dist-extension/
 seehub-extension.zip
 *.local
 .DS_Store
