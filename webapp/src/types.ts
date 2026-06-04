@@ -4,32 +4,15 @@ export type Ctrl =
   | { type: 'seek'; position: number; sentAt: number }
   | { type: 'heartbeat'; position: number; paused: boolean; sentAt: number }
 
-// Host → joiner full resync on peer join.
-export type StateMsg = {
-  url: string
-  position: number
-  paused: boolean
-  sentAt: number
-}
-
+// The vixcloud token is shareable across IPs (verified), so the host shares its
+// extracted m3u8 directly and every peer loads it — no per-peer extraction.
+// `fresh` = new episode (load from position); otherwise a token refresh / late
+// resync of the SAME stream (align position, reload only if the URL changed).
 export type UrlMsg = {
   url: string
-  position?: number
-  reason?: 'load' | 'token-refresh'
-}
-
-// Host switched episode → every peer must re-extract its OWN m3u8 for `ep`
-// (tokens are IP-bound) and reload from the start.
-export type EpisodeMsg = {
-  ep: string
-  sentAt: number
-}
-
-// Debug: test whether the host's raw m3u8 token works from the peer's IP.
-// `url` = host asking the peer to probe it; `result` = peer's reply.
-export type ProbeMsg = {
-  url?: string
-  result?: string
+  fresh: boolean
+  position: number
+  paused: boolean
 }
 
 export type PlayerState = {

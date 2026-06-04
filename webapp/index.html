@@ -105,33 +105,23 @@
             <input type="text" id="episode-input" placeholder="(host) URL episodio, es. https://streamingcommunityz.design/it/watch/1955?e=82376" />
             <button id="episode-load">Estrai e carica</button>
           </div>
-          <p class="hint">Incolla l'URL dell'episodio: il video si carica da solo (estensione) e genera l'invito per l'altra persona.</p>
+          <p class="hint">Host: incolla l'URL dell'episodio → il video si carica da solo (estensione) e viene condiviso con l'altra persona. Cambia episodio quando vuoi.</p>
         </div>
         <div class="panel">
           <div class="row">
             <input type="text" id="invite-link" readonly />
             <button id="copy-invite" class="secondary">Copia link invito</button>
           </div>
-          <p class="hint">Manda questo link all'altra persona. Si apre e basta.</p>
+          <p class="hint">Manda questo link all'altra persona. Si apre e parte da solo — niente da installare per lei.</p>
         </div>
 
-        <!-- Guest helper: shown when invite carries an episode and we have no stream yet -->
-        <div class="panel hidden" id="extract-panel">
-          <button id="extract-btn">▶︎ Avvia</button>
-          <p class="hint" id="extract-hint"></p>
-        </div>
-
-        <div class="panel" id="load-panel">
-          <div class="row">
-            <input type="text" id="m3u8-input" placeholder="Incolla qui l'URL .m3u8 (estensione / Shortcut)" />
+        <details class="panel">
+          <summary class="hint" style="cursor:pointer">Host: carica manualmente un .m3u8</summary>
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="m3u8-input" placeholder="Incolla qui l'URL .m3u8" />
             <button id="load-m3u8">Carica</button>
           </div>
-          <p class="hint" id="load-hint">Chi carica il video diventa host della sync.</p>
-          <div class="row" style="margin-top:8px">
-            <button id="probe-btn" class="secondary">🧪 Test: il mio link vale per il peer?</button>
-          </div>
-          <p class="hint">Debug IP-binding: manda il tuo m3u8 grezzo al peer, che lo prova dal suo IP e risponde.</p>
-        </div>
+        </details>
         <video id="video" controls playsinline></video>
       </section>
     </main>

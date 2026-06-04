@@ -31,8 +31,8 @@ await host.waitForSelector('#status.connected', { timeout: 90000 }).catch(() => 
 await guest.waitForSelector('#status.connected', { timeout: 30000 }).catch(() => fail('guest never connected'))
 console.log('✓ peers connected')
 
-// 2. Per-peer model: each peer loads its OWN m3u8 (tokens are IP-bound). Here
-// both are on the same IP, so the same test URL works for both.
+// 2. Shared-URL model: only the HOST loads an m3u8; the guest must receive it
+// over the room and load it automatically (vixcloud tokens are shareable).
 const videoReady = (page) =>
   page.waitForFunction(
     () => {
@@ -42,14 +42,17 @@ const videoReady = (page) =>
     { timeout: 60000 }
   )
 
+await host.evaluate(() => {
+  const d = document.querySelector('details')
+  if (d) d.open = true
+})
 await host.fill('#m3u8-input', TEST_M3U8)
 await host.click('#load-m3u8')
 await videoReady(host).catch(() => fail('host did not load its video'))
 
-await guest.fill('#m3u8-input', TEST_M3U8)
-await guest.click('#load-m3u8')
-await videoReady(guest).catch(() => fail('guest did not load its video'))
-console.log('✓ both peers loaded their own m3u8')
+// Guest pastes nothing — the host's URL is shared automatically.
+await videoReady(guest).catch(() => fail('guest did not auto-receive the host stream'))
+console.log('✓ host loaded; guest auto-received the shared URL')
 
 // 3. Host plays → guest plays
 await host.evaluate(() => document.getElementById('video').play().catch(() => {}))
@@ -88,33 +91,12 @@ const [hp, gp] = await Promise.all([
 console.log(`✓ stable after heartbeat — positions host=${hp.toFixed(1)}s guest=${gp.toFixed(1)}s drift=${Math.abs(hp - gp).toFixed(2)}s`)
 if (Math.abs(hp - gp) > 3) fail('drift too large')
 
-// 8. Host changes episode → guest is told (episode channel) to re-extract its
-// OWN m3u8 and is shown the extract panel. (Actual extraction needs the
-// extension, absent here — we assert the prompt/propagation only.)
-const NEW_EP = 'https://streamingcommunityz.design/it/watch/1955?e=82376'
-await host.fill('#episode-input', NEW_EP)
-await host.click('#episode-load')
-await guest
-  .waitForFunction(
-    (ep) => {
-      const panel = document.getElementById('extract-panel')
-      const input = document.getElementById('episode-input')
-      return panel && !panel.classList.contains('hidden') && input && input.value === ep
-    },
-    NEW_EP,
-    { timeout: 15000 }
-  )
-  .catch(() => fail('guest not prompted to re-extract after host episode change'))
-console.log('✓ episode change propagated host → guest')
-
-// 9. Reconnect realign: guest reloads (fresh MQTT connect → hello). The host
-// (still the authority) must push full state on hello so the returning guest
-// jumps to the host position, not back to 0, after reloading its own m3u8.
+// 8. Reconnect realign: guest reloads (fresh MQTT connect → hello). The host
+// re-shares its URL + position on hello, so the returning guest auto-loads the
+// stream again — NO manual paste — and jumps to the host position, not 0.
 await guest.reload()
 await guest.waitForSelector('#status.connected', { timeout: 30000 }).catch(() => fail('guest did not reconnect'))
-await guest.fill('#m3u8-input', TEST_M3U8)
-await guest.click('#load-m3u8')
-await videoReady(guest).catch(() => fail('returning guest did not reload its video'))
+await videoReady(guest).catch(() => fail('returning guest did not auto-receive the shared URL'))
 await guest
   .waitForFunction(() => document.getElementById('video').currentTime > 5, { timeout: 20000 })
   .catch(() => fail('returning guest did not realign to host position (stuck near 0)'))

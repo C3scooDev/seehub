@@ -11,14 +11,10 @@ function randomRoomId(): string {
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('')
 }
 
-// Name the user must give the imported Apple Shortcut.
-const SHORTCUT_NAME = 'SeeHub'
-
-function inviteUrl(roomId: string, episode?: string): string {
+function inviteUrl(roomId: string): string {
   const url = new URL(location.href)
   url.search = ''
   url.searchParams.set('room', roomId)
-  if (episode) url.searchParams.set('ep', episode)
   return url.toString()
 }
 
@@ -26,14 +22,8 @@ function isEpisodeUrl(ep: string): boolean {
   return /^https?:\/\/.*\/watch\/\d+/.test(ep) && /[?&]e=\d+/.test(ep)
 }
 
-function isIOS(): boolean {
-  const ua = navigator.userAgent
-  // iPadOS 13+ reports as desktop Mac; detect via touch points.
-  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-}
-
-function enterRoom(roomId: string, initialEpisode: string | null) {
-  showRoomView(inviteUrl(roomId, initialEpisode ?? undefined))
+function enterRoom(roomId: string) {
+  showRoomView(inviteUrl(roomId))
   setStatus(0)
 
   const room = new SyncRoom(roomId)
@@ -48,34 +38,20 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     onFatalError: (kind) => engine.notifyMediaFailed(kind),
   })
 
-  // Episode currently loaded/targeted on THIS device. Lets us tell a real
-  // episode change (re-extract from start, broadcast) from a token refresh of
-  // the same episode (preserve position, no broadcast).
-  let currentEpisode: string | null = initialEpisode
+  // Episode the host last extracted — distinguishes a real episode change
+  // (restart from 0) from a token refresh of the same episode (keep position).
+  let currentEpisode: string | null = null
 
   engine = new SyncEngine(player, room, {
     onPeersChanged: (count) => setStatus(count),
-    onNeedLocalUrl: (reason) => {
-      const msg =
-        reason === 'forbidden'
-          ? 'Il token è legato all’IP: il link non vale sulla tua rete. Estrai il TUO con l’estensione e incollalo qui.'
-          : reason === 'error'
-            ? 'Errore di riproduzione. Ri-estrai il link e riprova.'
-            : 'L’altra persona ha avviato l’episodio. Apri lo stesso episodio, estrai il TUO link con l’estensione e incollalo qui per sincronizzarti.'
-      ui.loadHint().textContent = msg
-      toast('Incolla il tuo link m3u8')
-    },
-    // The other peer switched episode → re-extract our own m3u8 for it.
-    onRemoteEpisode: (ep) => {
-      toast('L’altra persona ha cambiato episodio')
-      driveGuestExtraction(ep)
-    },
+    // A peer received the host's shared stream and loaded it.
+    onRemoteUrl: () => toast('In sync con l’host ✓'),
+    onMediaFailed: () =>
+      toast('Riproduzione interrotta (token scaduto?). L’host ri-estragga l’episodio.', 5000),
   })
 
-  // Last raw m3u8 loaded on THIS device — used by the IP-binding probe.
-  let lastRawUrl: string | null = null
-
-  // Central entry point for any m3u8 we obtain (manual, extension, Shortcut).
+  // Central entry point for any m3u8 the HOST obtains (extension or paste).
+  // It loads locally and is shared with every peer over the room.
   function load(url: string) {
     const trimmed = url.trim()
     if (!/^https?:\/\//.test(trimmed)) {
@@ -83,53 +59,12 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
       return
     }
     const reload = player.hasUrl
-    lastRawUrl = trimmed
     engine.userLoad(trimmed)
-    ui.extractPanel().classList.add('hidden')
     toast(reload ? 'Stream aggiornato' : 'Video caricato')
   }
 
-  // DEBUG: does the host's raw token work from the peer's IP? Host sends its
-  // m3u8; the peer fetches it from its OWN browser/IP and reports the status.
-  // 200 = shareable (not IP-bound); throw/non-200 = IP-bound, keep per-peer.
-  ui.probeBtn().addEventListener('click', () => {
-    if (!lastRawUrl) {
-      toast('Carica prima il TUO video, poi testa')
-      return
-    }
-    room.sendProbe({ url: lastRawUrl })
-    toast('Test inviato al peer…')
-  })
-  room.onProbe(async (msg) => {
-    if (msg.url) {
-      // We are the peer: probe the host's URL from our IP, then actually LOAD
-      // it so we confirm full playback (variants + AES key + .ts), not just the
-      // master fetch. If segments are IP-bound the player fires a fatal error.
-      let result: string
-      try {
-        const r = await fetch(msg.url, { method: 'GET' })
-        result = r.ok ? `${r.status} OK — master raggiungibile` : `${r.status} (bloccato)`
-      } catch {
-        result = 'bloccato (403/rete, niente CORS)'
-      }
-      console.log('[probe] host url from my IP:', result)
-      if (result.includes('OK')) {
-        toast('Master OK — carico il link dell’host per testare la riproduzione…', 6000)
-        load(msg.url)
-        result += ' — provo a riprodurre, guarda se parte'
-      } else {
-        toast('Test ricevuto: ' + result, 6000)
-      }
-      room.sendProbe({ result })
-    } else if (msg.result) {
-      // We are the host: show the peer's verdict.
-      console.log('[probe] peer verdict:', msg.result)
-      toast('PEER → ' + msg.result, 8000)
-    }
-  })
-
-  // Ask the browser extension (if installed) to resolve an episode URL to an
-  // m3u8 natively (background fetch, from this machine's IP). No-op without it.
+  // Ask the browser extension (host only) to resolve an episode URL to an m3u8
+  // natively (background fetch). No-op without the extension.
   let resolveTimer: number | undefined
   function requestResolve(ep: string) {
     if (!ep) return
@@ -139,11 +74,10 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     }
     window.postMessage({ type: 'SEEHUB_RESOLVE', ep }, location.origin)
     toast('Estrazione in corso…')
-    // If nothing loads, the extension is missing or the resolve failed.
     clearTimeout(resolveTimer)
     resolveTimer = window.setTimeout(() => {
       if (!player.hasUrl) toast('Nessuna risposta: estensione installata? Apri lo stesso browser.')
-    }, 9000)
+    }, 12000)
   }
 
   ui.copyInviteBtn().addEventListener('click', () => {
@@ -151,9 +85,8 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     toast('Link copiato ✓')
   })
 
-  // Host loads/changes the episode. A different episode is broadcast to the
-  // peer (it re-extracts its own m3u8 and restarts); the same episode again is
-  // just a token refresh (no broadcast, position preserved).
+  // Host loads/changes the episode. A different episode restarts from 0 for
+  // everyone; the same episode again is a token refresh (position preserved).
   function hostLoadEpisode(ep: string) {
     if (!ep) return
     if (!isEpisodeUrl(ep)) {
@@ -167,13 +100,6 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     requestResolve(ep)
   }
 
-  // Host fills the episode URL → invite link gains ?ep= so the guest can be
-  // driven hands-off (iPad Shortcut / desktop extension).
-  ui.episodeInput().addEventListener('input', () => {
-    const ep = ui.episodeInput().value.trim()
-    ui.inviteLink().value = inviteUrl(roomId, ep || undefined)
-  })
-  // Explicit button + commit (blur/enter) both trigger load/change.
   ui.episodeLoadBtn().addEventListener('click', () => {
     hostLoadEpisode(ui.episodeInput().value.trim())
   })
@@ -181,10 +107,11 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     hostLoadEpisode(ui.episodeInput().value.trim())
   })
 
+  // Host manual fallback: paste an m3u8 directly.
   ui.loadBtn().addEventListener('click', () => load(ui.m3u8Input().value))
 
-  // Auto-load from the browser extension bridge (it posts the captured m3u8
-  // into the SeeHub page so the guest never pastes anything).
+  // Auto-load from the browser extension bridge (host side): it posts the
+  // captured/resolved m3u8 into the page so the host never pastes anything.
   window.addEventListener('message', (event) => {
     if (event.source !== window) return
     if (event.data?.type === 'SEEHUB_M3U8' && typeof event.data.url === 'string') {
@@ -196,45 +123,14 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     }
   })
 
-  const params = new URLSearchParams(location.search)
-
-  // m3u8 handed over via query param (extension or Shortcut)
-  const m3u8 = params.get('m3u8')
+  // m3u8 handed over via query param (host extension/Shortcut deep-link).
+  const m3u8 = new URLSearchParams(location.search).get('m3u8')
   if (m3u8) {
     load(m3u8)
     const clean = new URL(location.href) // strip token from the address bar
     clean.searchParams.delete('m3u8')
     history.replaceState(null, '', clean)
   }
-
-  // Guest side: extract our OWN m3u8 for `ep` (token is IP-bound). Used both
-  // for the invite's initial ?ep and when the host changes episode mid-session.
-  // .onclick (not addEventListener) so repeated episode changes don't stack.
-  function driveGuestExtraction(ep: string) {
-    currentEpisode = ep
-    ui.episodeInput().value = ep
-    ui.extractPanel().classList.remove('hidden')
-    if (isIOS()) {
-      ui.extractBtn().textContent = '▶︎ Avvia'
-      ui.extractHint().textContent =
-        'iPad: tocca Avvia → lo Shortcut "SeeHub" estrae il tuo link e ti riporta qui sincronizzato.'
-      ui.extractBtn().onclick = () => {
-        const input = encodeURIComponent(roomId + '|' + ep)
-        location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=${input}`
-      }
-    } else {
-      // Desktop with the extension: resolves automatically in the background.
-      requestResolve(ep)
-      ui.extractBtn().textContent = '▶︎ Apri episodio'
-      ui.extractHint().textContent =
-        'PC: con l’estensione SeeHub il video si carica da solo. Se non parte, tocca per aprire l’episodio.'
-      ui.extractBtn().onclick = () => window.open(ep, '_blank')
-    }
-  }
-
-  // Guest helper: invite carried an episode and we have no stream yet.
-  const episode = params.get('ep')
-  if (episode && !m3u8) driveGuestExtraction(episode)
 }
 
 function init() {
@@ -242,7 +138,7 @@ function init() {
   const roomId = params.get('room')
 
   if (roomId) {
-    enterRoom(roomId, params.get('ep'))
+    enterRoom(roomId)
     return
   }
 
@@ -251,7 +147,7 @@ function init() {
     const url = new URL(location.href)
     url.searchParams.set('room', id)
     history.replaceState(null, '', url)
-    enterRoom(id, null)
+    enterRoom(id)
   })
 }
 
