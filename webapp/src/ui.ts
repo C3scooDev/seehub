@@ -17,6 +17,7 @@ export const ui = {
   extractHint: () => el<HTMLElement>('extract-hint'),
   m3u8Input: () => el<HTMLInputElement>('m3u8-input'),
   loadBtn: () => el<HTMLButtonElement>('load-m3u8'),
+  probeBtn: () => el<HTMLButtonElement>('probe-btn'),
   loadHint: () => el<HTMLElement>('load-hint'),
   video: () => el<HTMLVideoElement>('video'),
 }

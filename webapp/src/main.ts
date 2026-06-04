@@ -72,6 +72,9 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     },
   })
 
+  // Last raw m3u8 loaded on THIS device — used by the IP-binding probe.
+  let lastRawUrl: string | null = null
+
   // Central entry point for any m3u8 we obtain (manual, extension, Shortcut).
   function load(url: string) {
     const trimmed = url.trim()
@@ -80,10 +83,42 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
       return
     }
     const reload = player.hasUrl
+    lastRawUrl = trimmed
     engine.userLoad(trimmed)
     ui.extractPanel().classList.add('hidden')
     toast(reload ? 'Stream aggiornato' : 'Video caricato')
   }
+
+  // DEBUG: does the host's raw token work from the peer's IP? Host sends its
+  // m3u8; the peer fetches it from its OWN browser/IP and reports the status.
+  // 200 = shareable (not IP-bound); throw/non-200 = IP-bound, keep per-peer.
+  ui.probeBtn().addEventListener('click', () => {
+    if (!lastRawUrl) {
+      toast('Carica prima il TUO video, poi testa')
+      return
+    }
+    room.sendProbe({ url: lastRawUrl })
+    toast('Test inviato al peer…')
+  })
+  room.onProbe(async (msg) => {
+    if (msg.url) {
+      // We are the peer: probe the host's URL from our IP.
+      let result: string
+      try {
+        const r = await fetch(msg.url, { method: 'GET' })
+        result = r.ok ? `${r.status} OK — CONDIVISIBILE` : `${r.status} (bloccato)`
+      } catch {
+        result = 'bloccato (403/rete, niente CORS)'
+      }
+      console.log('[probe] host url from my IP:', result)
+      toast('Test ricevuto: ' + result, 6000)
+      room.sendProbe({ result })
+    } else if (msg.result) {
+      // We are the host: show the peer's verdict.
+      console.log('[probe] peer verdict:', msg.result)
+      toast('PEER → ' + msg.result, 8000)
+    }
+  })
 
   // Ask the browser extension (if installed) to resolve an episode URL to an
   // m3u8 natively (background fetch, from this machine's IP). No-op without it.

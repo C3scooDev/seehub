@@ -1,11 +1,11 @@
 import mqtt from 'mqtt'
 import { BROKER_URL, PRESENCE_PING_MS, PRESENCE_TIMEOUT_MS } from './config'
 import { deriveRoomCrypto, type RoomCrypto } from './crypto'
-import type { Ctrl, StateMsg, UrlMsg, EpisodeMsg } from './types'
+import type { Ctrl, StateMsg, UrlMsg, EpisodeMsg, ProbeMsg } from './types'
 
 export type PeerHandler = (peerId: string) => void
 
-type Channel = 'ctrl' | 'state' | 'url' | 'episode' | 'hello' | 'ack' | 'ping' | 'bye'
+type Channel = 'ctrl' | 'state' | 'url' | 'episode' | 'probe' | 'hello' | 'ack' | 'ping' | 'bye'
 type Envelope = { ch: Channel; from: string; data?: unknown }
 
 // Sync transport over a public MQTT broker. End-to-end encrypted; the broker
@@ -23,6 +23,7 @@ export class SyncRoom {
   private stateHandler: ((m: StateMsg, p: string) => void) | null = null
   private urlHandler: ((m: UrlMsg, p: string) => void) | null = null
   private episodeHandler: ((m: EpisodeMsg, p: string) => void) | null = null
+  private probeHandler: ((m: ProbeMsg, p: string) => void) | null = null
   private helloHandler: PeerHandler | null = null
   private joinHandler: PeerHandler | null = null
   private leaveHandler: PeerHandler | null = null
@@ -106,6 +107,9 @@ export class SyncRoom {
       case 'episode':
         this.episodeHandler?.(env.data as EpisodeMsg, env.from)
         break
+      case 'probe':
+        this.probeHandler?.(env.data as ProbeMsg, env.from)
+        break
       case 'bye':
         if (this.peers.delete(env.from)) this.leaveHandler?.(env.from)
         break
@@ -136,6 +140,10 @@ export class SyncRoom {
     void this.publish({ ch: 'episode', from: this.clientId, data: msg })
   }
 
+  sendProbe(msg: ProbeMsg) {
+    void this.publish({ ch: 'probe', from: this.clientId, data: msg })
+  }
+
   onCtrl(handler: (msg: Ctrl, peerId: string) => void) {
     this.ctrlHandler = handler
   }
@@ -150,6 +158,10 @@ export class SyncRoom {
 
   onEpisode(handler: (msg: EpisodeMsg, peerId: string) => void) {
     this.episodeHandler = handler
+  }
+
+  onProbe(handler: (msg: ProbeMsg, peerId: string) => void) {
+    this.probeHandler = handler
   }
 
   // Fires when a peer (re)announces itself via hello — used to re-push state.

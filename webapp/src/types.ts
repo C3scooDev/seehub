@@ -25,6 +25,13 @@ export type EpisodeMsg = {
   sentAt: number
 }
 
+// Debug: test whether the host's raw m3u8 token works from the peer's IP.
+// `url` = host asking the peer to probe it; `result` = peer's reply.
+export type ProbeMsg = {
+  url?: string
+  result?: string
+}
+
 export type PlayerState = {
   url: string | null
   position: number
