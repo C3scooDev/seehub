@@ -115,10 +115,22 @@ export class SyncEngine {
     this.pendingStart = { position: 0, paused: true }
   }
 
-  // Player reported a fatal load error (token expired, or media error).
+  // Player reported a fatal error (network drop, or token expired). The token
+  // is shareable and valid ~6h, so a transient failure usually just needs a
+  // reload of the same stream — the host's heartbeat then realigns the
+  // position. Retry locally (throttled); only give up if it keeps failing.
+  private mediaRetryAt = 0
   notifyMediaFailed(_kind: 'network' | 'media') {
     this.localMediaLoaded = false
-    this.ev.onMediaFailed()
+    const now = Date.now()
+    if (this.currentUrl && now - this.mediaRetryAt > 8000) {
+      this.mediaRetryAt = now
+      this.loadLocally(this.currentUrl, false, this.pendingStart ?? { position: 0, paused: true })
+      this.localMediaLoaded = true
+      this.ev.onRemoteUrl()
+    } else {
+      this.ev.onMediaFailed()
+    }
   }
 
   private loadLocally(url: string, fresh: boolean, start?: { position: number; paused: boolean }) {
@@ -167,18 +179,16 @@ export class SyncEngine {
     this.sawRemoteAuthority = true
     this.isHost = false
 
-    // Same stream re-shared on a join/hello resync → just realign, no reload.
-    if (msg.url === this.currentUrl && !msg.fresh) {
-      if (this.localMediaLoaded) {
-        if (msg.paused) this.player.remotePause(msg.position)
-        else this.player.remotePlay(msg.position)
-      } else {
-        this.pendingStart = { position: msg.position, paused: msg.paused }
-      }
+    // Same stream re-shared on a join/hello resync AND our media is alive →
+    // just realign, no reload. If our media died (network drop killed the
+    // player), fall through and reload even though the URL is unchanged.
+    if (msg.url === this.currentUrl && !msg.fresh && this.localMediaLoaded && this.player.hasUrl) {
+      if (msg.paused) this.player.remotePause(msg.position)
+      else this.player.remotePlay(msg.position)
       return
     }
 
-    // New stream from the host → load it (token works from our IP too).
+    // New stream (or recovering dead media) → load it at the host's position.
     this.currentUrl = msg.url
     this.pendingStart = { position: msg.position, paused: msg.paused }
     this.loadLocally(msg.url, msg.fresh, { position: msg.position, paused: msg.paused })

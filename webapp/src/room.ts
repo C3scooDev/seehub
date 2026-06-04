@@ -68,6 +68,10 @@ export class SyncRoom {
 
   private async publish(env: Envelope) {
     if (!this.client || !this.rc || !this.client.connected) {
+      // ctrl/ping are real-time: replaying them after a reconnect is harmful
+      // (a stale "seek 0" from a network glitch would reset the host). Drop
+      // them while offline; only durable messages (hello/url/bye) are queued.
+      if (env.ch === 'ctrl' || env.ch === 'ping') return
       this.outbox.push(env)
       return
     }

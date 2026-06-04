@@ -28,7 +28,11 @@ export class Player {
     this.video = video
     this.cb = cb
 
+    // After a fatal error url is null and the element may fire spurious
+    // play/pause/seeking-to-0 events (network glitch). Never propagate those —
+    // they would reset the other peer.
     video.addEventListener('play', () => {
+      if (this.url === null) return
       if (this.consume('play')) {
         console.debug('[player] play event consumed (remote)')
         return
@@ -36,7 +40,7 @@ export class Player {
       this.cb.onUserPlay(video.currentTime)
     })
     video.addEventListener('pause', () => {
-      if (video.ended) return
+      if (this.url === null || video.ended) return
       if (this.consume('pause')) {
         console.debug('[player] pause event consumed (remote)')
         return
@@ -44,6 +48,7 @@ export class Player {
       this.cb.onUserPause(video.currentTime)
     })
     video.addEventListener('seeking', () => {
+      if (this.url === null) return
       if (this.consume('seek')) return
       this.cb.onUserSeek(video.currentTime)
     })

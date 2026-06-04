@@ -107,6 +107,38 @@ const [hp2, gp2] = await Promise.all([
 console.log(`✓ reconnect realign — host=${hp2.toFixed(1)}s guest=${gp2.toFixed(1)}s drift=${Math.abs(hp2 - gp2).toFixed(2)}s`)
 if (Math.abs(hp2 - gp2) > 5) fail('reconnect realign drift too large')
 
+// 9. Network glitch (NO page reload): guest goes offline mid-playback, host
+// keeps going, guest comes back. Must NOT reset the host to 0 (stale ctrl is
+// dropped while offline) and must recover/realign instead of dying.
+await Promise.all([
+  host.evaluate(() => document.getElementById('video').play().catch(() => {})),
+  guest.evaluate(() => document.getElementById('video').play().catch(() => {})),
+])
+const hostBefore = await host.evaluate(() => document.getElementById('video').currentTime)
+await guestCtx.setOffline(true)
+await guest.waitForTimeout(6000) // segment fetch fails → media dies; MQTT drops
+await guestCtx.setOffline(false)
+// host must not have been yanked back near 0 by a stale "seek 0"
+await host.waitForTimeout(4000)
+const hostAfter = await host.evaluate(() => document.getElementById('video').currentTime)
+if (hostAfter < hostBefore - 2) fail(`host was reset by guest glitch: ${hostBefore.toFixed(1)}s → ${hostAfter.toFixed(1)}s`)
+// guest must recover and realign to the host (not stuck dead / at 0)
+await guest
+  .waitForFunction(
+    () => {
+      const v = document.getElementById('video')
+      return v && v.readyState >= 1 && v.currentTime > 5
+    },
+    { timeout: 25000 }
+  )
+  .catch(() => fail('guest did not recover/realign after network glitch'))
+const [hp3, gp3] = await Promise.all([
+  host.evaluate(() => document.getElementById('video').currentTime),
+  guest.evaluate(() => document.getElementById('video').currentTime),
+])
+console.log(`✓ glitch recovery — host kept ${hostAfter.toFixed(1)}s; realign host=${hp3.toFixed(1)}s guest=${gp3.toFixed(1)}s drift=${Math.abs(hp3 - gp3).toFixed(2)}s`)
+if (Math.abs(hp3 - gp3) > 6) fail('post-glitch realign drift too large')
+
 console.log('ALL PASS')
 await browser.close()
 process.exit(0)

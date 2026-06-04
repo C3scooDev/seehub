@@ -47,7 +47,7 @@ function enterRoom(roomId: string) {
     // A peer received the host's shared stream and loaded it.
     onRemoteUrl: () => toast('In sync con l’host ✓'),
     onMediaFailed: () =>
-      toast('Riproduzione interrotta (token scaduto?). L’host ri-estragga l’episodio.', 5000),
+      toast('Riproduzione persa più volte (token scaduto?). L’host ri-estragga l’episodio.', 5000),
   })
 
   // Central entry point for any m3u8 the HOST obtains (extension or paste).
