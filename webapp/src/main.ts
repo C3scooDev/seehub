@@ -102,16 +102,24 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
   })
   room.onProbe(async (msg) => {
     if (msg.url) {
-      // We are the peer: probe the host's URL from our IP.
+      // We are the peer: probe the host's URL from our IP, then actually LOAD
+      // it so we confirm full playback (variants + AES key + .ts), not just the
+      // master fetch. If segments are IP-bound the player fires a fatal error.
       let result: string
       try {
         const r = await fetch(msg.url, { method: 'GET' })
-        result = r.ok ? `${r.status} OK — CONDIVISIBILE` : `${r.status} (bloccato)`
+        result = r.ok ? `${r.status} OK — master raggiungibile` : `${r.status} (bloccato)`
       } catch {
         result = 'bloccato (403/rete, niente CORS)'
       }
       console.log('[probe] host url from my IP:', result)
-      toast('Test ricevuto: ' + result, 6000)
+      if (result.includes('OK')) {
+        toast('Master OK — carico il link dell’host per testare la riproduzione…', 6000)
+        load(msg.url)
+        result += ' — provo a riprodurre, guarda se parte'
+      } else {
+        toast('Test ricevuto: ' + result, 6000)
+      }
       room.sendProbe({ result })
     } else if (msg.result) {
       // We are the host: show the peer's verdict.
