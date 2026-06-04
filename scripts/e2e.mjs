@@ -116,7 +116,7 @@ await Promise.all([
 ])
 const hostBefore = await host.evaluate(() => document.getElementById('video').currentTime)
 await guestCtx.setOffline(true)
-await guest.waitForTimeout(6000) // segment fetch fails → media dies; MQTT drops
+await guest.waitForTimeout(12000) // long outage: must NOT give up while offline
 await guestCtx.setOffline(false)
 // host must not have been yanked back near 0 by a stale "seek 0"
 await host.waitForTimeout(4000)

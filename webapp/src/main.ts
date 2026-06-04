@@ -46,6 +46,7 @@ function enterRoom(roomId: string) {
     onPeersChanged: (count) => setStatus(count),
     // A peer received the host's shared stream and loaded it.
     onRemoteUrl: () => toast('In sync con l’host ✓'),
+    onConnLost: () => toast('Connessione persa — mi riallineo appena torna la rete…', 4000),
     onMediaFailed: () =>
       toast('Riproduzione persa più volte (token scaduto?). L’host ri-estragga l’episodio.', 5000),
   })

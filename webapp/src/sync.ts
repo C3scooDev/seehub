@@ -17,7 +17,9 @@ export type SyncEvents = {
   onPeersChanged: (count: number) => void
   // A peer received and loaded the host's shared stream (hide setup UI).
   onRemoteUrl: () => void
-  // Local playback failed (e.g. token expired). Host should re-extract.
+  // Playback dropped while offline — recovering when the network returns.
+  onConnLost: () => void
+  // Playback kept failing while online (e.g. token expired) — host re-extract.
   onMediaFailed: () => void
 }
 
@@ -42,6 +44,9 @@ export class SyncEngine {
   // URL currently loaded here — to skip needless reloads when the host re-sends
   // the same stream on a join/hello resync.
   private currentUrl: string | null = null
+  // Consecutive fatal media failures while ONLINE (token genuinely dead → give
+  // up after a few). Reset once playback is healthy again.
+  private failCount = 0
 
   constructor(player: Player, room: SyncRoom, ev: SyncEvents) {
     this.player = player
@@ -50,6 +55,15 @@ export class SyncEngine {
 
     room.onCtrl((msg) => this.handleCtrl(msg))
     room.onUrl((msg, peerId) => this.handleUrl(msg, peerId))
+
+    // When the network comes back, reload the (still valid) shared stream. The
+    // host's hello-triggered re-share also covers this; whichever fires first.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        this.failCount = 0
+        if (!this.localMediaLoaded) this.recoverMedia()
+      })
+    }
 
     room.onPeerJoin(() => {
       this.ev.onPeersChanged(room.peerCount())
@@ -116,21 +130,34 @@ export class SyncEngine {
   }
 
   // Player reported a fatal error (network drop, or token expired). The token
-  // is shareable and valid ~6h, so a transient failure usually just needs a
-  // reload of the same stream — the host's heartbeat then realigns the
-  // position. Retry locally (throttled); only give up if it keeps failing.
-  private mediaRetryAt = 0
+  // is shareable and valid ~6h, so a transient failure just needs a reload of
+  // the same stream once the network is back; the host heartbeat then realigns.
   notifyMediaFailed(_kind: 'network' | 'media') {
     this.localMediaLoaded = false
-    const now = Date.now()
-    if (this.currentUrl && now - this.mediaRetryAt > 8000) {
-      this.mediaRetryAt = now
-      this.loadLocally(this.currentUrl, false, this.pendingStart ?? { position: 0, paused: true })
-      this.localMediaLoaded = true
-      this.ev.onRemoteUrl()
-    } else {
-      this.ev.onMediaFailed()
+    if (!this.currentUrl) return this.ev.onMediaFailed()
+    // Offline → retrying now is pointless. Wait for the 'online' event or the
+    // host's reconnect re-share. (navigator.onLine can lie on mobile hotspots,
+    // so we still retry below if it claims to be online.)
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this.ev.onConnLost()
+      return
     }
+    // Keep retrying forever with capped backoff — NEVER permanently strand the
+    // peer. After a few failures the toast hints at a re-extract, but recovery
+    // still happens automatically on a good retry or the host re-sharing.
+    this.failCount++
+    this.ev[this.failCount >= 6 ? 'onMediaFailed' : 'onConnLost']()
+    const delay = Math.min(1000 * this.failCount, 10000)
+    window.setTimeout(() => {
+      if (!this.localMediaLoaded) this.recoverMedia()
+    }, delay)
+  }
+
+  private recoverMedia() {
+    if (!this.currentUrl) return
+    this.loadLocally(this.currentUrl, false, this.pendingStart ?? { position: 0, paused: true })
+    this.localMediaLoaded = true
+    this.ev.onRemoteUrl()
   }
 
   private loadLocally(url: string, fresh: boolean, start?: { position: number; paused: boolean }) {
@@ -189,6 +216,7 @@ export class SyncEngine {
     }
 
     // New stream (or recovering dead media) → load it at the host's position.
+    this.failCount = 0
     this.currentUrl = msg.url
     this.pendingStart = { position: msg.position, paused: msg.paused }
     this.loadLocally(msg.url, msg.fresh, { position: msg.position, paused: msg.paused })
@@ -199,6 +227,7 @@ export class SyncEngine {
   private applyDrift(hb: Extract<Ctrl, { type: 'heartbeat' }>) {
     const s = this.player.getState()
     if (!s.url) return
+    this.failCount = 0 // receiving + applying heartbeats = healthy again
     if (Date.now() - this.lastUserActionAt < HEARTBEAT_GRACE_MS) return
 
     if (hb.paused !== s.paused) {
