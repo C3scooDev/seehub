@@ -5,27 +5,30 @@ riferimento per capire *perché* il codice è fatto così.
 
 ---
 
-## 1. Scoperta centrale: il token vixcloud NON è IP-bound — è CONDIVISIBILE
+## 1. Scoperta centrale: il token NON è IP-bound, ma è SINGLE-SESSION
 
-- **Credenza precedente (sbagliata):** il token m3u8 era legato all'IP di chi
-  lo estrae → ogni peer doveva estrarre il suo. Era una **diagnosi errata** del
-  bug `&h=1` (sotto).
-- **Verifica empirica:** un peer su rete/IP diversa ha riprodotto l'm3u8 grezzo
-  dell'host — master, varianti, chiave AES e segmenti `.ts` inclusi. → il token
-  vale da qualsiasi IP.
-- **Test usato:** canale debug `probe` — l'host manda il suo m3u8, il peer lo
-  `fetch`a dal proprio browser/IP e poi lo carica nel player. 200 + riproduzione
-  = condivisibile. (Canale rimosso dopo la conferma.)
+- **Credenza iniziale (sbagliata):** token legato all'IP. Era una diagnosi
+  errata del bug `&h=1`.
+- **Verifica empirica:** un peer su IP diverso riproduce l'm3u8 dell'host
+  (master, varianti, chiave AES, segmenti) → **NON è IP-bound**.
+- **MA, scoperto sul campo:** lo **stesso** token non regge **due stream in
+  contemporanea** — il secondo che parte uccide il primo. → un singolo link
+  condiviso NON permette di guardare insieme.
 
-### Conseguenza: SVOLTA ARCHITETTURALE (commit `ac036bd`)
-- L'**host estrae UNA volta** (estensione) e condivide l'm3u8 sul canale `url`.
-- **Ogni peer carica lo stesso stream in automatico.**
-- **Per il guest: zero.** Apre il link e parte. iPad = HLS nativo Safari,
-  desktop = hls.js. Niente estensione, niente Shortcut, niente incolla.
-- Invito ora solo `?room=` (il guest non serve più `?ep=`).
-- `UrlMsg = {url, fresh, position, paused}`. `fresh` = nuovo episodio (riparti
-  da 0) vs token-refresh (riallinea, niente reload). `currentUrl` evita reload
-  inutili quando l'host ri-condivide lo stesso stream su join/hello.
+### Conseguenza: modello PER-PEER (commit `6c7e1fc`)
+Una breve "svolta shared-URL" (commit `ac036bd`, host estrae una volta e
+condivide l'm3u8) è fallita proprio per il single-session. Modello finale:
+
+- L'host condivide solo l'**EPISODIO** sul canale `episode`.
+- **Ogni peer estrae il PROPRIO token** (estensione desktop / Shortcut iPad) e
+  lo carica. Token distinti = niente conflitto.
+- **Si sincronizzano solo i TEMPI** (play/pause/seek + heartbeat).
+- `EpisodeMsg = {ep, fresh, position, paused, sentAt}`.
+- `sync.ts`: `userLoad(url, ep)` = host carica + condivide episodio;
+  `loadOwnToken(url)` = guest carica il suo token senza broadcastare;
+  `handleEpisode` → `onNeedSelfExtract`.
+- Trade-off accettato: il guest non è più zero-setup (serve l'estensione), in
+  cambio di un fallback sicuro che non va mai in conflitto.
 
 ---
 
