@@ -6,7 +6,7 @@ import {
 } from './config'
 import type { Player } from './player'
 import type { SyncRoom } from './room'
-import type { Ctrl, StateMsg, UrlMsg } from './types'
+import type { Ctrl, StateMsg, UrlMsg, EpisodeMsg } from './types'
 
 // Vixcloud tokens are bound to the extractor's IP, so peers on different
 // networks CANNOT share one m3u8 URL — each must extract and load its OWN.
@@ -19,6 +19,8 @@ export type NeedUrlReason = 'host-started' | 'forbidden' | 'error'
 export type SyncEvents = {
   onPeersChanged: (count: number) => void
   onNeedLocalUrl: (reason: NeedUrlReason) => void
+  // Host switched episode → this peer must re-extract its own m3u8 for `ep`.
+  onRemoteEpisode: (ep: string) => void
 }
 
 // After a local user action, ignore incoming heartbeats briefly: the host's
@@ -36,6 +38,9 @@ export class SyncEngine {
   private sawRemoteAuthority = false
   // Latest host position while we have no local media yet → jump here on load.
   private pendingStart: { position: number; paused: boolean } | null = null
+  // Next userLoad() is a fresh episode (load from pendingStart, not a token
+  // refresh that would preserve the current position).
+  private nextLoadFresh = false
 
   constructor(player: Player, room: SyncRoom, ev: SyncEvents) {
     this.player = player
@@ -45,12 +50,20 @@ export class SyncEngine {
     room.onCtrl((msg) => this.handleCtrl(msg))
     room.onState((msg) => this.handleState(msg))
     room.onUrl((msg, peerId) => this.handleUrl(msg, peerId))
+    room.onEpisode((msg) => this.handleEpisode(msg))
 
     room.onPeerJoin(() => {
       this.ev.onPeersChanged(room.peerCount())
       if (this.isHost && this.player.hasUrl) this.sendFullState()
     })
     room.onPeerLeave(() => this.ev.onPeersChanged(room.peerCount()))
+
+    // A peer (re)announcing itself — including after a dropped MQTT connection
+    // that reconnected — means it may be stale. If we're the authority, push a
+    // fresh full state so it realigns immediately instead of waiting a heartbeat.
+    room.onHello(() => {
+      if (this.isHost && this.player.hasUrl) this.sendFullState()
+    })
 
     setInterval(() => {
       if (this.isHost && this.player.hasUrl) {
@@ -85,8 +98,11 @@ export class SyncEngine {
   // User pasted an m3u8 (their own). Loads locally; broadcasts a host-claim
   // only if no other peer is already the authority.
   userLoad(url: string) {
-    const reload = this.player.hasUrl
-    if (reload) {
+    const fresh = this.nextLoadFresh
+    this.nextLoadFresh = false
+    // Token refresh of the SAME stream preserves the current position; a fresh
+    // episode (or first load) starts from pendingStart (host's position, or 0).
+    if (!fresh && this.player.hasUrl) {
       this.player.swapUrl(url)
     } else {
       const start = this.pendingStart
@@ -96,8 +112,18 @@ export class SyncEngine {
 
     if (!this.sawRemoteAuthority) {
       this.isHost = true
-      this.room.sendUrl({ url, reason: reload ? 'token-refresh' : 'load' })
+      this.room.sendUrl({ url, reason: fresh ? 'load' : 'token-refresh' })
     }
+  }
+
+  // Host picked a new episode. Broadcast it so the other peer re-extracts its
+  // own m3u8, and arm a fresh load (from the start) for our own re-extraction.
+  userChangeEpisode(ep: string) {
+    this.isHost = true
+    this.sawRemoteAuthority = false
+    this.nextLoadFresh = true
+    this.pendingStart = { position: 0, paused: true }
+    this.room.sendEpisode({ ep, sentAt: Date.now() })
   }
 
   // Player reported a fatal load error (403 token = IP-bound, or media error).
@@ -150,6 +176,17 @@ export class SyncEngine {
       this.pendingStart = { position: msg.position, paused: msg.paused }
       this.ev.onNeedLocalUrl('host-started')
     }
+  }
+
+  private handleEpisode(msg: EpisodeMsg) {
+    // The other peer became authority for a new episode. Drop our old media,
+    // arm a fresh load, and ask the UI to re-extract our own m3u8 for `ep`.
+    this.sawRemoteAuthority = true
+    this.isHost = false
+    this.localMediaLoaded = false
+    this.nextLoadFresh = true
+    this.pendingStart = { position: 0, paused: true }
+    this.ev.onRemoteEpisode(msg.ep)
   }
 
   private handleUrl(_msg: UrlMsg, peerId: string) {

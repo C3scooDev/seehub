@@ -18,6 +18,13 @@ export type UrlMsg = {
   reason?: 'load' | 'token-refresh'
 }
 
+// Host switched episode → every peer must re-extract its OWN m3u8 for `ep`
+// (tokens are IP-bound) and reload from the start.
+export type EpisodeMsg = {
+  ep: string
+  sentAt: number
+}
+
 export type PlayerState = {
   url: string | null
   position: number

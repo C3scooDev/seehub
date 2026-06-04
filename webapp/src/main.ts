@@ -22,6 +22,10 @@ function inviteUrl(roomId: string, episode?: string): string {
   return url.toString()
 }
 
+function isEpisodeUrl(ep: string): boolean {
+  return /^https?:\/\/.*\/watch\/\d+/.test(ep) && /[?&]e=\d+/.test(ep)
+}
+
 function isIOS(): boolean {
   const ua = navigator.userAgent
   // iPadOS 13+ reports as desktop Mac; detect via touch points.
@@ -44,6 +48,11 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     onFatalError: (kind) => engine.notifyMediaFailed(kind),
   })
 
+  // Episode currently loaded/targeted on THIS device. Lets us tell a real
+  // episode change (re-extract from start, broadcast) from a token refresh of
+  // the same episode (preserve position, no broadcast).
+  let currentEpisode: string | null = initialEpisode
+
   engine = new SyncEngine(player, room, {
     onPeersChanged: (count) => setStatus(count),
     onNeedLocalUrl: (reason) => {
@@ -55,6 +64,11 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
             : 'L’altra persona ha avviato l’episodio. Apri lo stesso episodio, estrai il TUO link con l’estensione e incollalo qui per sincronizzarti.'
       ui.loadHint().textContent = msg
       toast('Incolla il tuo link m3u8')
+    },
+    // The other peer switched episode → re-extract our own m3u8 for it.
+    onRemoteEpisode: (ep) => {
+      toast('L’altra persona ha cambiato episodio')
+      driveGuestExtraction(ep)
     },
   })
 
@@ -76,7 +90,7 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
   let resolveTimer: number | undefined
   function requestResolve(ep: string) {
     if (!ep) return
-    if (!/^https?:\/\/.*\/watch\/\d+/.test(ep) || !/[?&]e=\d+/.test(ep)) {
+    if (!isEpisodeUrl(ep)) {
       toast('URL episodio non valido (serve un link …/watch/<id>?e=<ep>)')
       return
     }
@@ -94,18 +108,34 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     toast('Link copiato ✓')
   })
 
+  // Host loads/changes the episode. A different episode is broadcast to the
+  // peer (it re-extracts its own m3u8 and restarts); the same episode again is
+  // just a token refresh (no broadcast, position preserved).
+  function hostLoadEpisode(ep: string) {
+    if (!ep) return
+    if (!isEpisodeUrl(ep)) {
+      toast('URL episodio non valido (serve un link …/watch/<id>?e=<ep>)')
+      return
+    }
+    if (ep !== currentEpisode) {
+      currentEpisode = ep
+      engine.userChangeEpisode(ep)
+    }
+    requestResolve(ep)
+  }
+
   // Host fills the episode URL → invite link gains ?ep= so the guest can be
   // driven hands-off (iPad Shortcut / desktop extension).
   ui.episodeInput().addEventListener('input', () => {
     const ep = ui.episodeInput().value.trim()
     ui.inviteLink().value = inviteUrl(roomId, ep || undefined)
   })
-  // Explicit button + commit (blur/enter) both trigger extension resolution.
+  // Explicit button + commit (blur/enter) both trigger load/change.
   ui.episodeLoadBtn().addEventListener('click', () => {
-    requestResolve(ui.episodeInput().value.trim())
+    hostLoadEpisode(ui.episodeInput().value.trim())
   })
   ui.episodeInput().addEventListener('change', () => {
-    requestResolve(ui.episodeInput().value.trim())
+    hostLoadEpisode(ui.episodeInput().value.trim())
   })
 
   ui.loadBtn().addEventListener('click', () => load(ui.m3u8Input().value))
@@ -134,28 +164,34 @@ function enterRoom(roomId: string, initialEpisode: string | null) {
     history.replaceState(null, '', clean)
   }
 
-  // Guest helper: invite carried an episode and we have no stream yet.
-  const episode = params.get('ep')
-  if (episode && !m3u8) {
-    ui.episodeInput().value = episode
-    const panel = ui.extractPanel()
-    panel.classList.remove('hidden')
+  // Guest side: extract our OWN m3u8 for `ep` (token is IP-bound). Used both
+  // for the invite's initial ?ep and when the host changes episode mid-session.
+  // .onclick (not addEventListener) so repeated episode changes don't stack.
+  function driveGuestExtraction(ep: string) {
+    currentEpisode = ep
+    ui.episodeInput().value = ep
+    ui.extractPanel().classList.remove('hidden')
     if (isIOS()) {
+      ui.extractBtn().textContent = '▶︎ Avvia'
       ui.extractHint().textContent =
         'iPad: tocca Avvia → lo Shortcut "SeeHub" estrae il tuo link e ti riporta qui sincronizzato.'
-      ui.extractBtn().addEventListener('click', () => {
-        const input = encodeURIComponent(roomId + '|' + episode)
+      ui.extractBtn().onclick = () => {
+        const input = encodeURIComponent(roomId + '|' + ep)
         location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=${input}`
-      })
+      }
     } else {
       // Desktop with the extension: resolves automatically in the background.
-      requestResolve(episode)
+      requestResolve(ep)
       ui.extractBtn().textContent = '▶︎ Apri episodio'
       ui.extractHint().textContent =
         'PC: con l’estensione SeeHub il video si carica da solo. Se non parte, tocca per aprire l’episodio.'
-      ui.extractBtn().addEventListener('click', () => window.open(episode, '_blank'))
+      ui.extractBtn().onclick = () => window.open(ep, '_blank')
     }
   }
+
+  // Guest helper: invite carried an episode and we have no stream yet.
+  const episode = params.get('ep')
+  if (episode && !m3u8) driveGuestExtraction(episode)
 }
 
 function init() {
