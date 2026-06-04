@@ -105,14 +105,20 @@
             <input type="text" id="episode-input" placeholder="(host) URL episodio, es. https://streamingcommunityz.design/it/watch/1955?e=82376" />
             <button id="episode-load">Estrai e carica</button>
           </div>
-          <p class="hint">Host: incolla l'URL dell'episodio → il video si carica da solo (estensione) e viene condiviso con l'altra persona. Cambia episodio quando vuoi.</p>
+          <p class="hint">Host: incolla l'URL dell'episodio → il TUO video si carica (estensione) e l'episodio viene condiviso con l'altra persona. Cambia episodio quando vuoi.</p>
         </div>
         <div class="panel">
           <div class="row">
             <input type="text" id="invite-link" readonly />
             <button id="copy-invite" class="secondary">Copia link invito</button>
           </div>
-          <p class="hint">Manda questo link all'altra persona. Si apre e parte da solo — niente da installare per lei.</p>
+          <p class="hint">Manda questo link all'altra persona. Ognuno estrae il proprio link (estensione/Shortcut): si sincronizzano solo i tempi.</p>
+        </div>
+
+        <!-- Guest: extract OUR OWN token when the host shares an episode -->
+        <div class="panel hidden" id="extract-panel">
+          <button id="extract-btn">▶︎ Avvia</button>
+          <p class="hint" id="extract-hint"></p>
         </div>
 
         <details class="panel">

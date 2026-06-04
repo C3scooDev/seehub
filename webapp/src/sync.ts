@@ -6,20 +6,23 @@ import {
 } from './config'
 import type { Player } from './player'
 import type { SyncRoom } from './room'
-import type { Ctrl, UrlMsg } from './types'
+import type { Ctrl, EpisodeMsg } from './types'
 
-// Vixcloud tokens turned out to be shareable across IPs (verified empirically),
-// so the host extracts ONCE and shares its m3u8 over the 'url' channel; every
-// peer loads that exact URL — no per-peer extraction, no extension for guests.
-// Controls (play/pause/seek) and a heartbeat keep playback in sync.
+// The vixcloud token is shareable across IPs but SINGLE-SESSION: two peers can't
+// stream the SAME token at once (the second kills the first). So each peer must
+// extract its OWN token from its OWN IP. The host shares only the EPISODE over
+// the 'episode' channel; every peer resolves its own m3u8 and loads it. Controls
+// (play/pause/seek) + a heartbeat keep playback in sync.
 
 export type SyncEvents = {
   onPeersChanged: (count: number) => void
-  // A peer received and loaded the host's shared stream (hide setup UI).
+  // This peer must resolve its OWN m3u8 for `ep` (extension / Shortcut).
+  onNeedSelfExtract: (ep: string) => void
+  // This peer loaded its own stream and is in sync.
   onRemoteUrl: () => void
   // Playback dropped while offline — recovering when the network returns.
   onConnLost: () => void
-  // Playback kept failing while online (e.g. token expired) — host re-extract.
+  // Playback kept failing while online (token expired) — re-extract.
   onMediaFailed: () => void
 }
 
@@ -38,14 +41,13 @@ export class SyncEngine {
   private sawRemoteAuthority = false
   // Latest host position while we have no local media yet → jump here on load.
   private pendingStart: { position: number; paused: boolean } | null = null
-  // Next userLoad() is a fresh episode (load from start, not a token refresh
-  // that would preserve the current position).
+  // Next load is a fresh episode (load from start, not a token refresh).
   private nextLoadFresh = false
-  // URL currently loaded here — to skip needless reloads when the host re-sends
-  // the same stream on a join/hello resync.
+  // Episode this device is on: host shares it; peers extract from it.
+  private currentEp: string | null = null
+  // The m3u8 (own token) currently loaded here — for reload on recovery.
   private currentUrl: string | null = null
-  // Consecutive fatal media failures while ONLINE (token genuinely dead → give
-  // up after a few). Reset once playback is healthy again.
+  // Consecutive fatal media failures while online — reset once healthy.
   private failCount = 0
 
   constructor(player: Player, room: SyncRoom, ev: SyncEvents) {
@@ -54,28 +56,27 @@ export class SyncEngine {
     this.ev = ev
 
     room.onCtrl((msg) => this.handleCtrl(msg))
-    room.onUrl((msg, peerId) => this.handleUrl(msg, peerId))
+    room.onEpisode((msg) => this.handleEpisode(msg))
 
-    // When the network comes back, reload the (still valid) shared stream. The
-    // host's hello-triggered re-share also covers this; whichever fires first.
+    // When the network comes back, reload the (still valid) own stream.
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
         this.failCount = 0
-        if (!this.localMediaLoaded) this.recoverMedia()
+        if (!this.localMediaLoaded && this.currentUrl) this.recoverMedia()
       })
     }
 
     room.onPeerJoin(() => {
       this.ev.onPeersChanged(room.peerCount())
-      if (this.isHost) this.broadcastCurrentUrl(false)
+      if (this.isHost) this.broadcastEpisode(false)
     })
     room.onPeerLeave(() => this.ev.onPeersChanged(room.peerCount()))
 
-    // A peer (re)announcing itself — including after a dropped MQTT connection
-    // that reconnected — means it may be stale. If we're the authority, re-share
-    // the URL + current position so it loads/realigns immediately.
+    // A peer (re)announcing itself — including after a reconnect — may be stale.
+    // If we're the authority, re-share the episode + position so it extracts /
+    // realigns immediately.
     room.onHello(() => {
-      if (this.isHost) this.broadcastCurrentUrl(false)
+      if (this.isHost) this.broadcastEpisode(false)
     })
 
     setInterval(() => {
@@ -108,49 +109,65 @@ export class SyncEngine {
     this.room.sendCtrl({ type: 'seek', position, sentAt: Date.now() })
   }
 
-  // The host loaded an m3u8 (from the extension or a manual paste). Load it
-  // locally and share it so every peer loads the same stream.
-  userLoad(url: string) {
+  // The HOST extracted its own m3u8 (from the extension). Load it locally and
+  // share the EPISODE (not the URL) so every peer extracts its own token.
+  userLoad(url: string, ep?: string) {
     const fresh = this.nextLoadFresh || !this.player.hasUrl
     this.nextLoadFresh = false
     this.loadLocally(url, fresh, this.pendingStart ?? undefined)
     this.currentUrl = url
+    if (ep) this.currentEp = ep
     this.localMediaLoaded = true
+    this.failCount = 0
     if (!this.sawRemoteAuthority) this.isHost = true
-    this.broadcastCurrentUrl(fresh)
+    this.broadcastEpisode(fresh)
   }
 
-  // Host is about to extract a NEW episode → arm a from-the-start load and
-  // reclaim authority. The subsequent userLoad() shares the new URL.
-  userChangeEpisode(_ep: string) {
+  // A PEER resolved its own m3u8 for the shared episode. Load it locally; do NOT
+  // broadcast (each peer has its own token; position syncs via the heartbeat).
+  loadOwnToken(url: string) {
+    this.loadLocally(url, this.nextLoadFresh || !this.player.hasUrl, this.pendingStart ?? undefined)
+    this.nextLoadFresh = false
+    this.currentUrl = url
+    this.localMediaLoaded = true
+    this.failCount = 0
+    this.isHost = false
+    this.ev.onRemoteUrl()
+  }
+
+  // Host is about to extract a NEW episode → arm a from-the-start load.
+  userChangeEpisode(ep: string) {
     this.isHost = true
     this.sawRemoteAuthority = false
     this.nextLoadFresh = true
+    this.currentEp = ep
     this.pendingStart = { position: 0, paused: true }
   }
 
-  // Player reported a fatal error (network drop, or token expired). The token
-  // is shareable and valid ~6h, so a transient failure just needs a reload of
-  // the same stream once the network is back; the host heartbeat then realigns.
   notifyMediaFailed(_kind: 'network' | 'media') {
     this.localMediaLoaded = false
-    if (!this.currentUrl) return this.ev.onMediaFailed()
-    // Offline → retrying now is pointless. Wait for the 'online' event or the
-    // host's reconnect re-share. (navigator.onLine can lie on mobile hotspots,
-    // so we still retry below if it claims to be online.)
+    if (!this.currentUrl && !this.currentEp) return this.ev.onMediaFailed()
+    // Offline → wait for the 'online' event / host re-share (navigator.onLine
+    // lies on mobile hotspots, so we still retry below if it claims online).
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       this.ev.onConnLost()
       return
     }
-    // Keep retrying forever with capped backoff — NEVER permanently strand the
-    // peer. After a few failures the toast hints at a re-extract, but recovery
-    // still happens automatically on a good retry or the host re-sharing.
     this.failCount++
-    this.ev[this.failCount >= 6 ? 'onMediaFailed' : 'onConnLost']()
-    const delay = Math.min(1000 * this.failCount, 10000)
-    window.setTimeout(() => {
-      if (!this.localMediaLoaded) this.recoverMedia()
-    }, delay)
+    // A few quick reloads of our own token (transient). If it keeps failing the
+    // token likely expired → re-extract a fresh one. Never strand permanently.
+    if (this.failCount <= 3 && this.currentUrl) {
+      this.ev.onConnLost()
+      const delay = Math.min(1000 * this.failCount, 5000)
+      window.setTimeout(() => {
+        if (!this.localMediaLoaded) this.recoverMedia()
+      }, delay)
+    } else if (this.currentEp) {
+      this.ev.onMediaFailed()
+      this.ev.onNeedSelfExtract(this.currentEp) // get a brand-new token
+    } else {
+      this.ev.onMediaFailed()
+    }
   }
 
   private recoverMedia() {
@@ -168,10 +185,16 @@ export class SyncEngine {
     }
   }
 
-  private broadcastCurrentUrl(fresh: boolean) {
-    if (!this.currentUrl) return
+  private broadcastEpisode(fresh: boolean) {
+    if (!this.currentEp) return
     const s = this.player.getState()
-    this.room.sendUrl({ url: this.currentUrl, fresh, position: s.position, paused: s.paused })
+    this.room.sendEpisode({
+      ep: this.currentEp,
+      fresh,
+      position: s.position,
+      paused: s.paused,
+      sentAt: Date.now(),
+    })
   }
 
   // --- incoming ---
@@ -198,36 +221,31 @@ export class SyncEngine {
     }
   }
 
-  private handleUrl(msg: UrlMsg, peerId: string) {
-    // If we both extracted near-simultaneously, lower clientId stays host and
-    // keeps its own stream (both tokens are valid — shareable).
-    if (this.isHost && this.localMediaLoaded && this.room.myId() < peerId) return
-
+  private handleEpisode(msg: EpisodeMsg) {
     this.sawRemoteAuthority = true
     this.isHost = false
-
-    // Same stream re-shared on a join/hello resync AND our media is alive →
-    // just realign, no reload. If our media died (network drop killed the
-    // player), fall through and reload even though the URL is unchanged.
-    if (msg.url === this.currentUrl && !msg.fresh && this.localMediaLoaded && this.player.hasUrl) {
-      if (msg.paused) this.player.remotePause(msg.position)
-      else this.player.remotePlay(msg.position)
-      return
-    }
-
-    // New stream (or recovering dead media) → load it at the host's position.
-    this.failCount = 0
-    this.currentUrl = msg.url
     this.pendingStart = { position: msg.position, paused: msg.paused }
-    this.loadLocally(msg.url, msg.fresh, { position: msg.position, paused: msg.paused })
-    this.localMediaLoaded = true
-    this.ev.onRemoteUrl()
+
+    const episodeChanged = msg.ep !== this.currentEp
+    if (msg.fresh || episodeChanged) {
+      // New episode → (re)extract our own token from the start.
+      this.currentEp = msg.ep
+      this.nextLoadFresh = true
+      this.localMediaLoaded = false
+      this.currentUrl = null
+      this.ev.onNeedSelfExtract(msg.ep)
+    } else if (!this.localMediaLoaded && !this.currentUrl) {
+      // Same episode resync but we never extracted yet (late/returning peer).
+      this.currentEp = msg.ep
+      this.ev.onNeedSelfExtract(msg.ep)
+    }
+    // else: same episode, already have our own token → heartbeat realigns us.
   }
 
   private applyDrift(hb: Extract<Ctrl, { type: 'heartbeat' }>) {
     const s = this.player.getState()
     if (!s.url) return
-    this.failCount = 0 // receiving + applying heartbeats = healthy again
+    this.failCount = 0 // applying heartbeats = healthy again
     if (Date.now() - this.lastUserActionAt < HEARTBEAT_GRACE_MS) return
 
     if (hb.paused !== s.paused) {

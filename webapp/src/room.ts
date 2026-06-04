@@ -1,11 +1,11 @@
 import mqtt from 'mqtt'
 import { BROKER_URL, PRESENCE_PING_MS, PRESENCE_TIMEOUT_MS } from './config'
 import { deriveRoomCrypto, type RoomCrypto } from './crypto'
-import type { Ctrl, UrlMsg } from './types'
+import type { Ctrl, EpisodeMsg } from './types'
 
 export type PeerHandler = (peerId: string) => void
 
-type Channel = 'ctrl' | 'url' | 'hello' | 'ack' | 'ping' | 'bye'
+type Channel = 'ctrl' | 'episode' | 'hello' | 'ack' | 'ping' | 'bye'
 type Envelope = { ch: Channel; from: string; data?: unknown }
 
 // Sync transport over a public MQTT broker. End-to-end encrypted; the broker
@@ -20,7 +20,7 @@ export class SyncRoom {
   private peers = new Map<string, number>() // peerId -> lastSeen ms
 
   private ctrlHandler: ((m: Ctrl, p: string) => void) | null = null
-  private urlHandler: ((m: UrlMsg, p: string) => void) | null = null
+  private episodeHandler: ((m: EpisodeMsg, p: string) => void) | null = null
   private helloHandler: PeerHandler | null = null
   private joinHandler: PeerHandler | null = null
   private leaveHandler: PeerHandler | null = null
@@ -99,8 +99,8 @@ export class SyncRoom {
       case 'ctrl':
         this.ctrlHandler?.(env.data as Ctrl, env.from)
         break
-      case 'url':
-        this.urlHandler?.(env.data as UrlMsg, env.from)
+      case 'episode':
+        this.episodeHandler?.(env.data as EpisodeMsg, env.from)
         break
       case 'bye':
         if (this.peers.delete(env.from)) this.leaveHandler?.(env.from)
@@ -120,16 +120,16 @@ export class SyncRoom {
     void this.publish({ ch: 'ctrl', from: this.clientId, data: msg })
   }
 
-  sendUrl(msg: UrlMsg) {
-    void this.publish({ ch: 'url', from: this.clientId, data: msg })
+  sendEpisode(msg: EpisodeMsg) {
+    void this.publish({ ch: 'episode', from: this.clientId, data: msg })
   }
 
   onCtrl(handler: (msg: Ctrl, peerId: string) => void) {
     this.ctrlHandler = handler
   }
 
-  onUrl(handler: (msg: UrlMsg, peerId: string) => void) {
-    this.urlHandler = handler
+  onEpisode(handler: (msg: EpisodeMsg, peerId: string) => void) {
+    this.episodeHandler = handler
   }
 
   // Fires when a peer (re)announces itself via hello — used to re-share the URL.

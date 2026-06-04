@@ -4,15 +4,15 @@ export type Ctrl =
   | { type: 'seek'; position: number; sentAt: number }
   | { type: 'heartbeat'; position: number; paused: boolean; sentAt: number }
 
-// The vixcloud token is shareable across IPs (verified), so the host shares its
-// extracted m3u8 directly and every peer loads it — no per-peer extraction.
-// `fresh` = new episode (load from position); otherwise a token refresh / late
-// resync of the SAME stream (align position, reload only if the URL changed).
-export type UrlMsg = {
-  url: string
+// The vixcloud token is SINGLE-SESSION, so the host shares only the episode and
+// each peer extracts its own token. `fresh` = new episode (extract from start);
+// otherwise a resync (extract only if we have no token yet; else just realign).
+export type EpisodeMsg = {
+  ep: string
   fresh: boolean
   position: number
   paused: boolean
+  sentAt: number
 }
 
 export type PlayerState = {

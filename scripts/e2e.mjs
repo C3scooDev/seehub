@@ -31,8 +31,11 @@ await host.waitForSelector('#status.connected', { timeout: 90000 }).catch(() => 
 await guest.waitForSelector('#status.connected', { timeout: 30000 }).catch(() => fail('guest never connected'))
 console.log('✓ peers connected')
 
-// 2. Shared-URL model: only the HOST loads an m3u8; the guest must receive it
-// over the room and load it automatically (vixcloud tokens are shareable).
+// 2. Per-peer model: the host shares the EPISODE; each peer extracts its OWN
+// token (single-session). The browser extension is absent here, so we simulate
+// it by posting the SEEHUB_M3U8 message it would post (same public test stream
+// for both — distinct tokens in reality). Only times sync after that.
+const EP = 'https://streamingcommunityz.design/it/watch/1955?e=82376'
 const videoReady = (page) =>
   page.waitForFunction(
     () => {
@@ -41,18 +44,23 @@ const videoReady = (page) =>
     },
     { timeout: 60000 }
   )
+const deliverToken = (page) =>
+  page.evaluate((u) => window.postMessage({ type: 'SEEHUB_M3U8', url: u }, location.origin), TEST_M3U8)
 
-await host.evaluate(() => {
-  const d = document.querySelector('details')
-  if (d) d.open = true
-})
-await host.fill('#m3u8-input', TEST_M3U8)
-await host.click('#load-m3u8')
-await videoReady(host).catch(() => fail('host did not load its video'))
+// Host enters the episode (→ resolveMode=host), extension "delivers" its token.
+await host.fill('#episode-input', EP)
+await host.click('#episode-load')
+await deliverToken(host)
+await videoReady(host).catch(() => fail('host did not load its own token'))
 
-// Guest pastes nothing — the host's URL is shared automatically.
-await videoReady(guest).catch(() => fail('guest did not auto-receive the host stream'))
-console.log('✓ host loaded; guest auto-received the shared URL')
+// Guest is prompted to self-extract (host shared the episode); simulate its
+// extension delivering a SEPARATE token.
+await guest
+  .waitForSelector('#extract-panel:not(.hidden)', { timeout: 15000 })
+  .catch(() => fail('guest was not asked to self-extract'))
+await deliverToken(guest)
+await videoReady(guest).catch(() => fail('guest did not load its own token'))
+console.log('✓ host + guest each loaded their OWN token (episode shared, no conflict)')
 
 // 3. Host plays → guest plays
 await host.evaluate(() => document.getElementById('video').play().catch(() => {}))
@@ -92,11 +100,15 @@ console.log(`✓ stable after heartbeat — positions host=${hp.toFixed(1)}s gue
 if (Math.abs(hp - gp) > 3) fail('drift too large')
 
 // 8. Reconnect realign: guest reloads (fresh MQTT connect → hello). The host
-// re-shares its URL + position on hello, so the returning guest auto-loads the
-// stream again — NO manual paste — and jumps to the host position, not 0.
+// re-shares the EPISODE on hello, the returning guest re-extracts its own token
+// (simulated) and jumps to the host position, not 0.
 await guest.reload()
 await guest.waitForSelector('#status.connected', { timeout: 30000 }).catch(() => fail('guest did not reconnect'))
-await videoReady(guest).catch(() => fail('returning guest did not auto-receive the shared URL'))
+await guest
+  .waitForSelector('#extract-panel:not(.hidden)', { timeout: 20000 })
+  .catch(() => fail('returning guest was not asked to re-extract'))
+await deliverToken(guest)
+await videoReady(guest).catch(() => fail('returning guest did not reload its own token'))
 await guest
   .waitForFunction(() => document.getElementById('video').currentTime > 5, { timeout: 20000 })
   .catch(() => fail('returning guest did not realign to host position (stuck near 0)'))
