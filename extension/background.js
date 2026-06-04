@@ -5,6 +5,27 @@
 
 const SITE = 'https://streamingcommunityz.design'
 
+// vixcloud flip-flops on whether the token is signed WITH or WITHOUT the
+// quality suffix (&h=1 / &b=1). It has changed twice already and will again.
+// Instead of hard-coding one, probe each candidate and use whichever the
+// server actually serves (HEAD → 200). FHD-first because that's the current
+// requirement; bare/&b=1 stay as fallbacks. Adaptive = never chase a flip.
+const VARIANTS = ['&h=1', '', '&b=1', '&h=1&b=1']
+
+async function pickPlayable(purl, token, expires) {
+  const base = `${purl}?token=${token}&expires=${expires}`
+  for (const v of VARIANTS) {
+    const url = base + v
+    try {
+      const r = await fetch(url, { method: 'HEAD' })
+      if (r.ok) return url
+    } catch (_) {
+      /* network hiccup — try next variant */
+    }
+  }
+  throw new Error('nessuna variante m3u8 valida (403 su tutte — token/IP?)')
+}
+
 async function resolveEpisode(ep) {
   const id = ep.match(/watch\/(\d+)/)?.[1]
   const epid = ep.match(/[?&]e=(\d+)/)?.[1]
@@ -21,9 +42,7 @@ async function resolveEpisode(ep) {
   const purl = t2.match(/url:\s*'(https:\/\/vixcloud\.co\/playlist\/[^']+)'/)?.[1]
   if (!token || !expires || !purl) throw new Error('masterPlaylist non trovata')
 
-  // NB: appending &h=1/&b=1 now yields 403 — the token is signed over the bare
-  // query string. Keep just token+expires; the master lists all renditions.
-  return `${purl}?token=${token}&expires=${expires}`
+  return pickPlayable(purl, token, expires)
 }
 
 async function storeM3u8(url) {
